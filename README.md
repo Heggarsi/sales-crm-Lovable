@@ -210,31 +210,25 @@ The UI was developed using **vibe coding with the Lovable tool**, enabling rapid
 
 ## Backend Architecture
 
-_Add backend folder structure screenshot here_
 
 ## Dashboard
 
-_Add dashboard screenshot_
+
 
 ## Leads Module
 
-_Add leads module screenshot_
 
 ## Opportunities
 
-_Add opportunities pipeline screenshot_
 
 ## Proposals
 
-_Add proposal management screenshot_
 
 ## Sales Orders
 
-_Add sales orders screenshot_
 
 ## Analytics Dashboard
 
-_Add charts and analytics screenshot_
 
 ---
 
