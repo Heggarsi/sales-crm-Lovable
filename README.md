@@ -292,6 +292,16 @@ Through this project, I explored:
 
 ---
 
+## 🚧 Project Status
+
+The backend API for the CRM system has been fully implemented.
+
+Frontend development is currently in progress.  
+At the moment, **backend API integration has been completed for the Users page**, and the remaining pages will be integrated with the backend APIs in upcoming updates.
+
+This repository currently focuses on demonstrating the **complete backend architecture and API design**, along with the frontend structure for the CRM dashboard.
+
+
 # 🔮 Future Improvements
 
 Possible improvements include:
