@@ -210,24 +210,41 @@ The UI was developed using **vibe coding with the Lovable tool**, enabling rapid
 
 ## Backend Architecture
 
+<img width="344" height="1066" alt="14Backendfolder 2026-03-07 151742" src="https://github.com/user-attachments/assets/53bbaf1d-de9e-4dbc-8189-f5b9f7aea3b2" />
 
 ## Dashboard
 
+<img width="2140" height="1239" alt="2Dashboard 2026-03-07 145053" src="https://github.com/user-attachments/assets/ab4ea7b4-4903-47e9-a801-f827b6a664cc" />
 
 
 ## Leads Module
 
+<img width="2140" height="1244" alt="3Leads 2026-03-07 145752" src="https://github.com/user-attachments/assets/333333db-c7b6-48f4-9dd3-e1284d7522f0" />
+<img width="2141" height="1243" alt="4Leadbusinessinfo2026-03-07 145826" src="https://github.com/user-attachments/assets/5a035e4d-f927-49bb-9255-2a4aa186ae33" />
+<img width="2141" height="1244" alt="5Leadqualification2026-03-07 145900" src="https://github.com/user-attachments/assets/2a611155-00fe-4daa-87ca-29e8289e9fa2" />
 
 ## Opportunities
 
+<img width="2140" height="1242" alt="6Opportunity 2026-03-07 145934" src="https://github.com/user-attachments/assets/f3972452-6ffb-4791-a992-bbca4d8c0d65" />
+<img width="2139" height="1239" alt="7Lostapportunity2026-03-07 145950" src="https://github.com/user-attachments/assets/0b7d816e-10b1-4674-b5fa-7f1094009570" />
 
 ## Proposals
-
+<img width="2137" height="1240" alt="8Appointment 2026-03-07 150009" src="https://github.com/user-attachments/assets/a45bb6c2-4af8-4784-9b0d-a79820adedc2" />
+<img width="2137" height="1245" alt="9Proposal 2026-03-07 151344" src="https://github.com/user-attachments/assets/82dee5c5-d01e-40d5-a1bc-19696e5fc83e" />
 
 ## Sales Orders
 
+<img width="2140" height="1246" alt="10Salesorder 2026-03-07 151414" src="https://github.com/user-attachments/assets/32002d70-e310-4479-a270-202ef7208bba" />
+<img width="2136" height="1243" alt="11Lostorder 2026-03-07 151451" src="https://github.com/user-attachments/assets/5690061a-bb75-47b1-8de2-ad68b5022f9c" />
 
-## Analytics Dashboard
+
+## Activity
+
+<img width="2136" height="1243" alt="12Activity 2026-03-07 151519" src="https://github.com/user-attachments/assets/e05a2f0c-0ae0-41ea-8963-d4042ca7a623" />
+
+## Users
+
+<img width="2140" height="1243" alt="13Users 2026-03-07 145720" src="https://github.com/user-attachments/assets/658001fd-bc11-4ec5-b8a4-708f4dc22147" />
 
 
 ---
