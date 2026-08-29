@@ -57,7 +57,7 @@ CREATE TABLE `accounts` (
   KEY `fk_accounts_updated_by` (`UpdatedBy`),
   CONSTRAINT `fk_accounts_created_by` FOREIGN KEY (`CreatedBy`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_accounts_updated_by` FOREIGN KEY (`UpdatedBy`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -93,7 +93,7 @@ CREATE TABLE `activitylog` (
   CONSTRAINT `fk_activity_appointment` FOREIGN KEY (`AppointmentId`) REFERENCES `appointment` (`AppointmentId`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_activity_type` FOREIGN KEY (`ActivityTypeId`) REFERENCES `activitytype` (`ActivityTypeId`),
   CONSTRAINT `fk_activity_user` FOREIGN KEY (`CreatedByUserId`) REFERENCES `users` (`UserId`) ON DELETE RESTRICT ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=94 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=95 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -163,7 +163,7 @@ CREATE TABLE `appointment` (
   CONSTRAINT `fk_appointment_deal` FOREIGN KEY (`DealId`) REFERENCES `deals` (`DealId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_appointment_lead` FOREIGN KEY (`LeadId`) REFERENCES `leads` (`LeadId`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_appointment_status` FOREIGN KEY (`AppointmentStatusId`) REFERENCES `appointmentstatus` (`AppointmentStatusId`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -255,7 +255,7 @@ CREATE TABLE `contacts` (
   CONSTRAINT `fk_contacts_account` FOREIGN KEY (`AccountId`) REFERENCES `accounts` (`AccountId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_contacts_created_by` FOREIGN KEY (`CreatedBy`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_contacts_updated_by` FOREIGN KEY (`UpdatedBy`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -303,7 +303,7 @@ CREATE TABLE `deals` (
   CONSTRAINT `fk_deals_stage` FOREIGN KEY (`DealStageId`) REFERENCES `dealstage` (`DealStageId`) ON UPDATE CASCADE,
   CONSTRAINT `fk_deals_updated_by` FOREIGN KEY (`UpdatedBy`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `deals_chk_probability` CHECK ((`Probability` between 0 and 100))
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=42 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -340,6 +340,81 @@ CREATE TABLE `deliverystatus` (
   UNIQUE KEY `StatusName` (`StatusName`),
   UNIQUE KEY `UQ_deliverystatus_statusname` (`StatusName`)
 ) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `lead_followup_type`
+--
+
+DROP TABLE IF EXISTS `lead_followup_type`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `lead_followup_type` (
+  `FollowUpTypeId` int NOT NULL AUTO_INCREMENT,
+  `TypeName` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `Description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `IsActive` tinyint(1) DEFAULT '1',
+  `IsDeleted` tinyint(1) DEFAULT '0',
+  `CreatedAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  `UpdatedAt` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`FollowUpTypeId`),
+  UNIQUE KEY `UQ_lead_followup_type_name` (`TypeName`),
+  KEY `idx_lft_active` (`IsActive`),
+  KEY `idx_lft_deleted` (`IsDeleted`)
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `lead_service_required`
+--
+
+DROP TABLE IF EXISTS `lead_service_required`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `lead_service_required` (
+  `ServiceRequiredId` int NOT NULL AUTO_INCREMENT,
+  `ServiceName` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `Description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `IsActive` tinyint(1) DEFAULT '1',
+  `IsDeleted` tinyint(1) DEFAULT '0',
+  `CreatedAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  `UpdatedAt` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ServiceRequiredId`),
+  UNIQUE KEY `UQ_lead_service_required_name` (`ServiceName`),
+  KEY `idx_lsr_active` (`IsActive`),
+  KEY `idx_lsr_deleted` (`IsDeleted`)
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `leadfollowup`
+--
+
+DROP TABLE IF EXISTS `leadfollowup`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `leadfollowup` (
+  `FollowUpId` int NOT NULL AUTO_INCREMENT,
+  `LeadId` int NOT NULL,
+  `FollowUpDate` datetime NOT NULL,
+  `FollowUpTypeId` int NOT NULL,
+  `Remarks` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `NextFollowUpDate` datetime DEFAULT NULL,
+  `IsDeleted` tinyint(1) DEFAULT '0',
+  `CreatedByUserId` int DEFAULT NULL,
+  `CreatedAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  `UpdatedAt` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`FollowUpId`),
+  KEY `idx_followup_lead` (`LeadId`),
+  KEY `idx_followup_type` (`FollowUpTypeId`),
+  KEY `idx_followup_date` (`FollowUpDate`),
+  KEY `idx_followup_nextdate` (`NextFollowUpDate`),
+  KEY `idx_followup_deleted` (`IsDeleted`),
+  KEY `fk_followup_creator` (`CreatedByUserId`),
+  CONSTRAINT `fk_followup_creator` FOREIGN KEY (`CreatedByUserId`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_followup_lead` FOREIGN KEY (`LeadId`) REFERENCES `leads` (`LeadId`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_followup_type` FOREIGN KEY (`FollowUpTypeId`) REFERENCES `lead_followup_type` (`FollowUpTypeId`) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -384,6 +459,9 @@ CREATE TABLE `leads` (
   `CreatedBy` int DEFAULT NULL,
   `UpdatedBy` int DEFAULT NULL,
   `LeadStatusId` int DEFAULT NULL,
+  `ServiceRequiredId` int DEFAULT NULL,
+  `EstimatedValue` decimal(15,2) DEFAULT NULL,
+  `Remarks` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
   PRIMARY KEY (`LeadId`),
   UNIQUE KEY `LeadNumber` (`LeadNumber`),
   UNIQUE KEY `UQ_leads_leadnumber` (`LeadNumber`),
@@ -404,16 +482,18 @@ CREATE TABLE `leads` (
   KEY `idx_leads_converted_account` (`ConvertedAccountId`),
   KEY `idx_leads_converted_contact` (`ConvertedContactId`),
   KEY `idx_leads_converted_deal` (`ConvertedDealId`),
+  KEY `idx_leads_service_required` (`ServiceRequiredId`),
   CONSTRAINT `fk_leads_assigned_by` FOREIGN KEY (`AssignedBy`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_leads_assigned_user` FOREIGN KEY (`AssignedToUserId`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_leads_converted_account` FOREIGN KEY (`ConvertedAccountId`) REFERENCES `accounts` (`AccountId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_leads_converted_contact` FOREIGN KEY (`ConvertedContactId`) REFERENCES `contacts` (`ContactId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_leads_converted_deal` FOREIGN KEY (`ConvertedDealId`) REFERENCES `deals` (`DealId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_leads_created_by` FOREIGN KEY (`CreatedBy`) REFERENCES `users` (`UserId`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_leads_service_required` FOREIGN KEY (`ServiceRequiredId`) REFERENCES `lead_service_required` (`ServiceRequiredId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_leads_source` FOREIGN KEY (`SourceId`) REFERENCES `leadsource` (`SourceId`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_leads_status` FOREIGN KEY (`LeadStatusId`) REFERENCES `leadstatus` (`LeadStatusId`),
   CONSTRAINT `fk_leads_type` FOREIGN KEY (`LeadTypeId`) REFERENCES `leadtype` (`LeadTypeId`) ON DELETE RESTRICT ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=23 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=52 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -437,7 +517,7 @@ CREATE TABLE `leadsource` (
   UNIQUE KEY `UQ_leadsource_sourcename` (`SourceName`),
   KEY `idx_source_active` (`IsActive`),
   KEY `idx_source_deleted` (`IsDeleted`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -577,7 +657,7 @@ CREATE TABLE `proposal` (
   CONSTRAINT `fk_proposal_deal` FOREIGN KEY (`DealId`) REFERENCES `deals` (`DealId`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_proposal_parent` FOREIGN KEY (`ParentProposalId`) REFERENCES `proposal` (`ProposalId`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_proposal_status` FOREIGN KEY (`ProposalStatusId`) REFERENCES `proposalstatus` (`ProposalStatusId`)
-) ENGINE=InnoDB AUTO_INCREMENT=69 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=85 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -705,7 +785,7 @@ CREATE TABLE `users` (
   KEY `idx_users_deleted` (`IsDeleted`),
   KEY `fk_users_role` (`RoleId`),
   CONSTRAINT `fk_users_role` FOREIGN KEY (`RoleId`) REFERENCES `userrole` (`RoleId`)
-) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -721,4 +801,4 @@ CREATE TABLE `users` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-05-18 17:20:56
+-- Dump completed on 2026-08-29 23:25:42

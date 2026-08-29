@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 interface KPICardProps {
   title: string;
@@ -47,6 +47,12 @@ export function KPICard({
                 <span className="flex items-center text-sm text-destructive font-medium">
                   <TrendingDown className="w-4 h-4 mr-0.5" />
                   {change}%
+                </span>
+              )}
+              {!isPositive && !isNegative && (
+                <span className="flex items-center text-sm text-muted-foreground font-medium">
+                  <Minus className="w-4 h-4 mr-0.5" />
+                  0%
                 </span>
               )}
               {changeLabel && (

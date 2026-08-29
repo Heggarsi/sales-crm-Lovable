@@ -37,7 +37,7 @@ export function PipelineChart({ data = [] }: PipelineChartProps) {
     <div className="card-elevated p-6 animate-slide-up" style={{ animationDelay: "0.2s" }}>
       <div className="mb-6">
         <h3 className="text-lg font-semibold">Sales Pipeline</h3>
-        <p className="text-sm text-muted-foreground">Opportunities by stage</p>
+        <p className="text-sm text-muted-foreground">Deals by stage</p>
       </div>
       <div className="h-[300px]">
         {chartData.length > 0 ? (

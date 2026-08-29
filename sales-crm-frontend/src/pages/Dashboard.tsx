@@ -102,7 +102,7 @@ export default function Dashboard() {
             variant="info"
           />
           <KPICard
-            title="Opportunities"
+            title="Deals"
             value={kpis.opportunities?.value.toLocaleString() || "0"}
             icon={<TrendingUp className="w-6 h-6 text-success" />}
             change={kpis.opportunities?.change || 0}
