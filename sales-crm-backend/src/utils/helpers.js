@@ -18,8 +18,8 @@ const helpers = {
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 10;
     const offset = (pageNum - 1) * limitNum;
-    return { 
-      limit: limitNum, 
+    return {
+      limit: limitNum,
       offset: offset,
       page: pageNum
     };
@@ -49,7 +49,15 @@ const helpers = {
 
   // Format date to MySQL datetime
   formatDateTimeForMySQL: (date = new Date()) => {
-    return date.toISOString().slice(0, 19).replace('T', ' ');
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toISOString().slice(0, 19).replace('T', ' ');
+  },
+
+  // Format date to MySQL date (YYYY-MM-DD)
+  formatDateForMySQL: (date) => {
+    if (!date) return null;
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toISOString().split('T')[0];
   },
 
   // Validate email format
@@ -58,7 +66,7 @@ const helpers = {
     return emailRegex.test(email);
   },
 
-  
+
 
   // Validate phone format (basic)
   isValidPhone: (phone) => {

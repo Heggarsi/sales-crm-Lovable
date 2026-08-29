@@ -16,7 +16,7 @@ const AppointmentController = {
 
   // Get all appointments
   getAllAppointments: asyncHandler(async (req, res) => {
-    const { page, limit, leadId, appointmentStatusId, fromDate, toDate, search } = req.query;
+    const { page, limit, leadId, appointmentStatusId, fromDate, toDate, search, requireDealId, dealId, requireContactId, requireLeadId } = req.query;
 
     const filters = {
       page: page || 1,
@@ -25,7 +25,12 @@ const AppointmentController = {
       appointmentStatusId,
       fromDate,
       toDate,
-      search
+      search,
+      requireDealId,
+      dealId,
+      requireContactId,
+      requireLeadId,
+      includeProposals: req.query.includeProposals === 'true'
     };
 
     const result = await AppointmentService.getAllAppointments(filters, req.user);

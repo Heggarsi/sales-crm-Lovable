@@ -83,6 +83,17 @@ const UserController = {
     });
   }),
 
+  // Get role by ID
+  getRoleById: asyncHandler(async (req, res) => {
+    const role = await UserService.getRoleById(req.params.id);
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Role retrieved successfully',
+      data: role
+    });
+  }),
+
   // Get sales persons
   getSalesPersons: asyncHandler(async (req, res) => {
     const salesPersons = await UserService.getSalesPersons();
@@ -91,6 +102,38 @@ const UserController = {
       success: true,
       message: 'Sales persons retrieved successfully',
       data: salesPersons
+    });
+  }),
+
+  // Create role
+  createRole: asyncHandler(async (req, res) => {
+    const role = await UserService.createRole(req.body);
+
+    res.status(HTTP_STATUS.CREATED).json({
+      success: true,
+      message: 'Role created successfully',
+      data: role
+    });
+  }),
+
+  // Update role
+  updateRole: asyncHandler(async (req, res) => {
+    const role = await UserService.updateRole(req.params.id, req.body);
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Role updated successfully',
+      data: role
+    });
+  }),
+
+  // Delete role
+  deleteRole: asyncHandler(async (req, res) => {
+    await UserService.deleteRole(req.params.id);
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Role deleted successfully'
     });
   })
 };

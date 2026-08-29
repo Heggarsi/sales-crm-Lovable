@@ -1,7 +1,6 @@
 const LostOrderModel = require('../models/LostOrderModel');
 const ProposalModel = require('../models/ProposalModel');
-const OpportunityModel = require('../models/OpportunityModel');
-const ActivityLogModel = require('../models/ActivityLogModel');
+const DealModel = require('../models/DealModel');
 const AuditLogModel = require('../models/AuditLogModel');
 const { AppError } = require('../middlewares/errorHandler.middleware');
 const { HTTP_STATUS, ROLES } = require('../config/constants');
@@ -48,11 +47,6 @@ const LostOrderService = {
         throw new AppError('Only submitted or under review proposals can be rejected', HTTP_STATUS.BAD_REQUEST);
       }
 
-      // Cannot reject own proposal (conflict of interest)
-      if (proposal.CreatedBy === user.UserId) {
-        throw new AppError('You cannot reject your own proposal', HTTP_STATUS.FORBIDDEN);
-      }
-
       // Validate rejection reason
       if (!rejectionData.Reason) {
         throw new AppError('Rejection reason is required', HTTP_STATUS.BAD_REQUEST);
@@ -70,27 +64,21 @@ const LostOrderService = {
         [rejectionData.Reason, proposalId]
       );
 
+      // Expire all other sibling proposals for this deal (mirrors approval behavior)
+      await ProposalModel.expireOtherProposals(proposal.DealId, proposalId, connection);
+
+      // Since all siblings are now expired, always move deal to Closed Lost
+      await DealModel.moveToClosedLostStage(proposal.DealId, user.UserId, connection);
+
       // Create lost order record
       const lostOrderId = await LostOrderModel.create({
         ProposalId: proposalId,
         Reason: rejectionData.Reason,
         DetailedFeedback: rejectionData.DetailedFeedback,
         CompetitorWon: rejectionData.CompetitorWon
-      },connection);
+      }, connection);
 
-      // Log activity
-      await connection.query(
-        `INSERT INTO activitylog (
-          LeadId, ActivityTypeId, Subject, Description, Direction,
-          Outcome, ActivityDate, CreatedByUserId, IsDeleted, CreatedAt, UpdatedAt
-        ) VALUES (?, 4, ?, ?, 'Internal', 'Rejected', NOW(), ?, 0, NOW(), NOW())`,
-        [
-          proposal.LeadId,
-          `Proposal Rejected: ${proposal.ProposalTitle}`,
-          `Proposal rejected. Reason: ${rejectionData.Reason}. ${rejectionData.DetailedFeedback || ''}`,
-          user.UserId
-        ]
-      );
+      const accountId = await ProposalModel.getAccountIdByProposalId(proposalId);
 
       // Audit log
       await connection.query(
@@ -100,9 +88,9 @@ const LostOrderService = {
         [
           proposalId,
           JSON.stringify({ ProposalStatusId: proposal.ProposalStatusId }),
-          JSON.stringify({ 
+          JSON.stringify({
             ProposalStatusId: 5,
-            RejectionReason: rejectionData.Reason 
+            RejectionReason: rejectionData.Reason
           }),
           user.UserId
         ]
@@ -113,10 +101,10 @@ const LostOrderService = {
       const updatedProposal = await ProposalModel.findById(proposalId);
       const lostOrder = await LostOrderModel.findById(lostOrderId);
 
-      logger.info('Proposal rejected', { 
-        proposalId, 
+      logger.info('Proposal rejected', {
+        proposalId,
         lostOrderId,
-        rejectedBy: user.UserId 
+        rejectedBy: user.UserId
       });
 
       return {
@@ -168,7 +156,7 @@ const LostOrderService = {
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (lostOrder.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only access lost orders for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError('You can only access lost orders for deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -191,7 +179,7 @@ const LostOrderService = {
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (lostOrder.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only update lost orders for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError('You can only update lost orders for deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -268,7 +256,7 @@ const LostOrderService = {
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (proposal.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only access lost orders for proposals of leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError('You can only access lost orders for proposals of deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -289,12 +277,19 @@ const LostOrderService = {
   getLossAnalysis: async (user) => {
     try {
       const analysis = await LostOrderModel.getLossAnalysis(user.UserId, user.RoleId);
+      const { wonDeals, lostDeals } = analysis;
+      const totalClosed = wonDeals + lostDeals;
+
+      const lossRateValue = totalClosed > 0 ? (lostDeals / totalClosed) * 100 : 0;
+      const lossRate = `${lossRateValue.toFixed(1)}%`;
 
       return {
         rejectionReasons: analysis.byReason,
         topCompetitors: analysis.byCompetitor,
-        totalLost: analysis.byReason.reduce((sum, item) => sum + item.Count, 0),
-        totalLostValue: analysis.byReason.reduce((sum, item) => sum + parseFloat(item.TotalValue), 0)
+        //totalLost: lostDeals,
+        totalLost: analysis.byReason.reduce((sum, item) => sum + parseInt(item.Count), 0),
+        totalLostValue: analysis.byReason.reduce((sum, item) => sum + parseFloat(item.TotalValue), 0),
+        lossRate
       };
     } catch (error) {
       logger.error('Get loss analysis error:', error);

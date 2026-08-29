@@ -11,12 +11,12 @@ const lostOrderValidation = {
   updateLostOrder: [
     param('id')
       .isInt({ min: 1 }).withMessage('Invalid lost order ID'),
-    
+
     body('DetailedFeedback')
       .optional()
       .trim()
       .isLength({ max: 2000 }).withMessage('Detailed feedback must not exceed 2000 characters'),
-    
+
     body('CompetitorWon')
       .optional()
       .trim()

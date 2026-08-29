@@ -240,6 +240,15 @@
 }
 
 @layer utilities {
+  /* Hide scrollbars but keep scrollability (no visible vertical/horizontal scrollbars) */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
   .gradient-primary {
     background: var(--gradient-primary);
   }

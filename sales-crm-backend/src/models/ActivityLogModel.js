@@ -6,7 +6,7 @@ const ActivityLogModel = {
   create: async (activityData) => {
     try {
       const {
-        LeadId,
+        AppointmentId,
         ActivityTypeId,
         Subject,
         Description,
@@ -21,12 +21,12 @@ const ActivityLogModel = {
 
       const [result] = await pool.query(
         `INSERT INTO activitylog (
-          LeadId, ActivityTypeId, Subject, Description, Direction, Duration,
+          AppointmentId, ActivityTypeId, Subject, Description, Direction, Duration,
           Outcome, ActivityDate, ScheduledFollowUp, CreatedByUserId,
           Attachments, IsDeleted, CreatedAt, UpdatedAt
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())`,
         [
-          LeadId, ActivityTypeId, Subject, Description, Direction, Duration,
+          AppointmentId, ActivityTypeId, Subject, Description, Direction, Duration,
           Outcome, ActivityDate || helpers.formatDateTimeForMySQL(),
           ScheduledFollowUp || null, CreatedByUserId,
           typeof Attachments === 'object' ? JSON.stringify(Attachments) : Attachments
@@ -47,14 +47,17 @@ const ActivityLogModel = {
         `SELECT 
           al.*,
           at.TypeName as ActivityTypeName,
-          l.LeadNumber,
-          l.CustomerName,
-          l.CompanyName,
-          l.AssignedToUserId,
+          ap.AppointmentNumber,
+          ap.Title as AppointmentTitle,
+          ap.StartDateTime,
+          ap.EndDateTime,
+          ap.Mode,
+          ap.Location,
+          ap.AppointmentStatusId,
           u.Name as CreatedByName
          FROM activitylog al
          LEFT JOIN activitytype at ON al.ActivityTypeId = at.ActivityTypeId
-         LEFT JOIN leads l ON al.LeadId = l.LeadId
+         LEFT JOIN appointment ap ON al.AppointmentId = ap.AppointmentId
          LEFT JOIN users u ON al.CreatedByUserId = u.UserId
          WHERE al.ActivityId = ? AND al.IsDeleted = 0`,
         [activityId]
@@ -63,7 +66,7 @@ const ActivityLogModel = {
       if (rows.length > 0 && rows[0].Attachments) {
         try {
           rows[0].Attachments = JSON.parse(rows[0].Attachments);
-        } catch (e) {}
+        } catch (e) { }
       }
 
       return rows[0] || null;
@@ -79,16 +82,20 @@ const ActivityLogModel = {
       const {
         page = 1,
         limit = 10,
-        leadId,
+        appointmentId,
         activityTypeId,
         createdByUserId,
-        assignedToUserId,
         fromDate,
         toDate,
         search
       } = filters;
 
-      const offset = (page - 1) * limit;
+      const pageNum = parseInt(page) || 1;
+      const limitNum = parseInt(limit) || 10;
+      const offset = (pageNum - 1) * limitNum;
+      logger.debug(`Offset: ${offset}`);
+      logger.debug(`Limit: ${limitNum}`);
+      logger.debug(`Page: ${pageNum}`);
 
       let query = `
         SELECT 
@@ -102,24 +109,27 @@ const ActivityLogModel = {
           al.ScheduledFollowUp,
           al.CreatedAt,
           at.TypeName as ActivityTypeName,
-          l.LeadId,
-          l.LeadNumber,
-          l.CustomerName,
-          l.CompanyName,
-          l.AssignedToUserId,
+          ap.AppointmentId,
+          ap.AppointmentNumber,
+          ap.Title as AppointmentTitle,
+          ap.StartDateTime,
+          ap.EndDateTime,
+          ap.Mode,
+          ap.Location,
+          ap.AppointmentStatusId,
           u.Name as CreatedByName
         FROM activitylog al
         LEFT JOIN activitytype at ON al.ActivityTypeId = at.ActivityTypeId
-        LEFT JOIN leads l ON al.LeadId = l.LeadId
+        LEFT JOIN appointment ap ON al.AppointmentId = ap.AppointmentId
         LEFT JOIN users u ON al.CreatedByUserId = u.UserId
         WHERE al.IsDeleted = 0
       `;
 
       const params = [];
 
-      if (leadId) {
-        query += ' AND al.LeadId = ?';
-        params.push(leadId);
+      if (appointmentId) {
+        query += ' AND al.AppointmentId = ?';
+        params.push(appointmentId);
       }
 
       if (activityTypeId) {
@@ -130,11 +140,6 @@ const ActivityLogModel = {
       if (createdByUserId) {
         query += ' AND al.CreatedByUserId = ?';
         params.push(createdByUserId);
-      }
-
-      if (assignedToUserId) {
-        query += ' AND l.AssignedToUserId = ?';
-        params.push(assignedToUserId);
       }
 
       if (fromDate) {
@@ -148,9 +153,9 @@ const ActivityLogModel = {
       }
 
       if (search) {
-        query += ' AND (al.Subject LIKE ? OR al.Description LIKE ? OR l.CustomerName LIKE ?)';
+        query += ' AND (al.Subject LIKE ? OR al.Description LIKE ? OR ap.Title LIKE ? OR ap.AppointmentNumber LIKE ?)';
         const searchTerm = `%${search}%`;
-        params.push(searchTerm, searchTerm, searchTerm);
+        params.push(searchTerm, searchTerm, searchTerm, searchTerm);
       }
 
       const countQuery = query.replace(
@@ -161,7 +166,7 @@ const ActivityLogModel = {
       const [countResult] = await pool.query(countQuery, params);
       const total = countResult[0].total;
 
-      query += ' ORDER BY al.ActivityDate DESC LIMIT ? OFFSET ?';
+      query += ' ORDER BY al.ActivityDate DESC, al.ActivityId DESC LIMIT ? OFFSET ?';
       params.push(parseInt(limit), parseInt(offset));
 
       const [rows] = await pool.query(query, params);
@@ -237,8 +242,8 @@ const ActivityLogModel = {
     }
   },
 
-  // Get activities by lead
-  getByLeadId: async (leadId) => {
+  // Get activities by appointment
+  getByAppointmentId: async (appointmentId) => {
     try {
       const [rows] = await pool.query(
         `SELECT 
@@ -248,22 +253,22 @@ const ActivityLogModel = {
          FROM activitylog al
          LEFT JOIN activitytype at ON al.ActivityTypeId = at.ActivityTypeId
          LEFT JOIN users u ON al.CreatedByUserId = u.UserId
-         WHERE al.LeadId = ? AND al.IsDeleted = 0
+         WHERE al.AppointmentId = ? AND al.IsDeleted = 0
          ORDER BY al.ActivityDate DESC`,
-        [leadId]
+        [appointmentId]
       );
 
       rows.forEach(row => {
         if (row.Attachments) {
           try {
             row.Attachments = JSON.parse(row.Attachments);
-          } catch (e) {}
+          } catch (e) { }
         }
       });
 
       return rows;
     } catch (error) {
-      logger.error('Error getting activities by lead:', error);
+      logger.error('Error getting activities by appointment:', error);
       throw error;
     }
   },
@@ -275,12 +280,15 @@ const ActivityLogModel = {
         `SELECT 
           al.*, 
           at.TypeName as ActivityTypeName, 
-          l.LeadNumber, 
-          l.CustomerName, 
-          l.CompanyName 
+          ap.AppointmentNumber,
+          ap.Title as AppointmentTitle,
+          ap.StartDateTime,
+          ap.EndDateTime,
+          ap.Mode,
+          ap.Location
          FROM activitylog al 
          LEFT JOIN activitytype at ON al.ActivityTypeId = at.ActivityTypeId 
-         LEFT JOIN leads l ON al.LeadId = l.LeadId 
+         LEFT JOIN appointment ap ON al.AppointmentId = ap.AppointmentId 
          WHERE al.ScheduledFollowUp IS NOT NULL 
          AND al.ScheduledFollowUp >= CURDATE() 
          AND al.ScheduledFollowUp <= DATE_ADD(CURDATE(), INTERVAL ? DAY) 

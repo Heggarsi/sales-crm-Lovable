@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Layers, Plus, Search, MoreHorizontal, Edit, Trash2, Eye } from "lucide-react";
-import { AppLayout } from "@/components/layout/AppLayout";
+import { SettingsLayout } from "@/components/layout/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -88,7 +88,7 @@ export default function SourceTypes() {
   );
 
   return (
-    <AppLayout userRole="admin" userName="Alex Thompson">
+    <SettingsLayout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -198,6 +198,6 @@ export default function SourceTypes() {
         onOpenChange={setIsDeleteOpen}
         onConfirm={confirmDelete}
       />
-    </AppLayout>
+    </SettingsLayout>
   );
 }

@@ -19,6 +19,7 @@ interface CrudDialogProps {
   onCancel?: () => void;
   saveLabel?: string;
   isLoading?: boolean;
+  disabled?: boolean;
   mode?: "create" | "edit" | "view";
 }
 
@@ -32,6 +33,7 @@ export function CrudDialog({
   onCancel,
   saveLabel = "Save",
   isLoading = false,
+  disabled = false,
   mode = "create",
 }: CrudDialogProps) {
   const handleCancel = () => {
@@ -49,13 +51,13 @@ export function CrudDialog({
         <div className="py-4">{children}</div>
         {mode !== "view" && (
           <DialogFooter>
-            <Button variant="outline" onClick={handleCancel} disabled={isLoading}>
+            <Button variant="outline" onClick={handleCancel} disabled={isLoading || disabled}>
               Cancel
             </Button>
             <Button 
               className="gradient-primary text-primary-foreground" 
               onClick={onSave}
-              disabled={isLoading}
+              disabled={isLoading || disabled}
             >
               {isLoading ? "Saving..." : saveLabel}
             </Button>

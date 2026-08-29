@@ -22,6 +22,7 @@ const errorHandler = (err, req, res, next) => {
   logger.error('Error occurred:', {
     message: error.message,
     statusCode: error.statusCode,
+    errors: err.errors,
     stack: err.stack,
     url: req.originalUrl,
     method: req.method

@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const UserController = require('../controllers/user.controller');
 const userValidation = require('../validations/userValidation');
@@ -12,6 +12,18 @@ router.use(authenticate);
 
 // Get all roles (accessible to authenticated users)
 router.get('/roles', UserController.getAllRoles);
+
+// Get role by ID (accessible to authenticated users)
+router.get('/roles/:id', UserController.getRoleById);
+
+// Create role (Admin only)
+router.post('/roles', isAdmin, UserController.createRole);
+
+// Update role (Admin only)
+router.put('/roles/:id', isAdmin, UserController.updateRole);
+
+// Delete role (Admin only)
+router.delete('/roles/:id', isAdmin, UserController.deleteRole);
 
 // Get sales persons (for lead assignment - Admin & Sales Manager)
 router.get(

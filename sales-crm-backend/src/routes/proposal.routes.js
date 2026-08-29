@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const ProposalController = require('../controllers/proposal.controller');
 const proposalValidation = require('../validations/proposalValidation');
@@ -150,6 +150,12 @@ router.get(
 );
 
 // ==================== LINKING & RELATIONSHIPS ====================
+// Get all linked proposal-appointments (Admin/Manager)
+router.get(
+  '/appointments/links',
+  checkPermission(PERMISSIONS.READ_PROPOSAL),
+  ProposalController.getAllProposalAppointments
+);
 
 // Link appointment to proposal
 router.post(
@@ -160,14 +166,20 @@ router.post(
   ProposalController.linkAppointment
 );
 
-// Get proposals by opportunity
+// Delete proposal-appointment link
+router.delete(
+  '/appointments/links/:linkId',
+  isAdminOrManager,
+  ProposalController.deleteProposalAppointmentLink
+);
+
+// Get proposals by deal
 router.get(
-  '/opportunity/:opportunityId',
-  proposalValidation.getProposalsByOpportunity,
+  '/deal/:dealId',
+  proposalValidation.getProposalsByDeal,
   validate,
   checkPermission(PERMISSIONS.READ_PROPOSAL),
-  ProposalController.getProposalsByOpportunity
+  ProposalController.getProposalsByDeal
 );
 
 module.exports = router;
-

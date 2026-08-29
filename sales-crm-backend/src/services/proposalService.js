@@ -1,14 +1,11 @@
 const ProposalModel = require('../models/ProposalModel');
 const ProposalStatusModel = require('../models/ProposalStatusModel');
 const ProposalAppointmentModel = require('../models/ProposalAppointmentModel');
-const OpportunityModel = require('../models/OpportunityModel');
+const DealModel = require('../models/DealModel');
 const AppointmentModel = require('../models/AppointmentModel')
-const LeadModel = require('../models/LeadsModel');
-const ActivityLogModel = require('../models/ActivityLogModel');
 const AuditLogModel = require('../models/AuditLogModel');
-const emailService = require('../utils/emailService');
 const { AppError } = require('../middlewares/errorHandler.middleware');
-const { HTTP_STATUS, ROLES } = require('../config/constants');
+const { HTTP_STATUS, ROLES, DEAL_STAGE } = require('../config/constants');
 const logger = require('../utils/logger');
 const helpers = require('../utils/helpers');
 const { pool } = require('../config/database');
@@ -27,85 +24,83 @@ const ProposalService = {
     try {
       await connection.beginTransaction();
 
-      const { OpportunityId } = proposalData;
-
-      // Check if opportunity exists
-      const opportunity = await OpportunityModel.findById(OpportunityId);
-      if (!opportunity) {
-        throw new AppError('Opportunity not found', HTTP_STATUS.NOT_FOUND);
-      }
-
-      // In-memory ownership check
-      if (user.RoleId === ROLES.SALES_PERSON) {
-        if (opportunity.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only create proposals for opportunities of leads assigned to you', HTTP_STATUS.FORBIDDEN);
-        }
-      }
-
-      // Check opportunity is in Proposal stage or later (Stage >= 3)
-      if (opportunity.OpportunityStageId < 3) {
-        throw new AppError('Opportunity must be in Proposal stage or later', HTTP_STATUS.BAD_REQUEST);
-      }
-
-      // Check if opportunity is active
-      if (opportunity.OpportunityStatusId !== 1) {
-        throw new AppError('Opportunity must be active to create proposal', HTTP_STATUS.BAD_REQUEST);
-      }
-      
       // Generate content hash
-      const contentHash = generateProposalHash(proposalData);
+      const { DealId } = proposalData;
+      const deal = await DealModel.findById(DealId);
+
+      if (!deal) {
+        throw new AppError('Deal not found', HTTP_STATUS.NOT_FOUND);
+      }
+
+      // Deal stage gate:
+      // - Only allow proposals when deal is at/above stage 3 (Value Proposition)
+      // - Closed Won (stage 6) and Closed Lost (stage 7) cannot create any new proposals
+      if (deal.DealStageId === DEAL_STAGE.CLOSED_WON) {
+        throw new AppError(
+          'Cannot create a new proposal for a Closed Won deal',
+          HTTP_STATUS.BAD_REQUEST
+        );
+      }
+      if (deal.DealStageId === DEAL_STAGE.CLOSED_LOST) {
+        throw new AppError(
+          'Cannot create a new proposal for a Closed Lost deal',
+          HTTP_STATUS.BAD_REQUEST
+        );
+      }
+
+      if (deal.DealStageId < DEAL_STAGE.VALUE_PROPOSITION) {
+        throw new AppError(
+          'Deal stage must be 3 or above to create a proposal',
+          HTTP_STATUS.BAD_REQUEST
+        );
+      }
+
+      if (user.RoleId === ROLES.SALES_PERSON && deal.AssignedToUserId !== user.UserId) {
+        throw new AppError('You can only create proposals for deals assigned to you', HTTP_STATUS.FORBIDDEN);
+      }
+
+      const contentHash = generateProposalHash({ ...proposalData, DealId });
 
       // ❗ Check against ALL previous versions
       const duplicateProposal =
-      await ProposalModel.findByOpportunityAndHash(
-        OpportunityId,
-        contentHash
-      );
+        await ProposalModel.findByDealAndHash(
+          DealId,
+          contentHash
+        );
 
       if (duplicateProposal) {
-      throw new AppError(
-        'A proposal with the same content already exists for this opportunity.',
-        HTTP_STATUS.BAD_REQUEST
-      );
+        throw new AppError(
+          'A proposal with the same content already exists for this deal.',
+          HTTP_STATUS.BAD_REQUEST
+        );
       }
 
       // Get next version number for this opportunity
-      const maxVersion = await ProposalModel.getMaxVersionNo(OpportunityId);
+      const maxVersion = await ProposalModel.getMaxVersionNo(DealId);
       const versionNo = maxVersion + 1;
-      
+
 
       // Set validity date (default 30 days from now)
       const validityDays = parseInt(process.env.PROPOSAL_VALIDITY_DAYS) || 30;
-      const validityDate = proposalData.ValidityDate || 
+      const validityDate = proposalData.ValidityDate ||
         helpers.formatDateTimeForMySQL(new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000));
 
       // Create proposal      
       const proposalId = await ProposalModel.create({
         ...proposalData,
+        DealId,
         VersionNo: versionNo,
         ValidityDate: validityDate,
         ProposalStatusId: 1,
         ContentHash: contentHash,
         CreatedBy: user.UserId
-      });
-      
+      }, connection);
 
-      // Log activity
-      await connection.query(
-        `INSERT INTO activitylog (
-          LeadId, ActivityTypeId, Subject, Description, Direction,
-          ActivityDate, CreatedByUserId, IsDeleted, CreatedAt, UpdatedAt
-        ) VALUES (?, 4, ?, ?, 'Internal', NOW(), ?, 0, NOW(), NOW())`,
-        [
-          opportunity.LeadId,
-          `Proposal Created: ${proposalData.ProposalTitle}`,
-          `Proposal created with amount ${proposalData.Currency} ${proposalData.ProposalAmount}. Version ${versionNo}.`,
-          user.UserId
-        ]
-      );
+      await DealModel.moveToProposalStage(DealId, user.UserId, connection);
+      const accountId = deal.AccountId || null;
 
       // Audit log
-      const newProposal = await ProposalModel.findById(proposalId);
+      const newProposal = await ProposalModel.findById(proposalId, connection);
       await connection.query(
         `INSERT INTO auditlog (
           TableName, RecordId, Action, NewValues, ChangedBy, ChangedAt
@@ -134,7 +129,7 @@ const ProposalService = {
   // Get all proposals
   getAllProposals: async (filters, user) => {
     try {
-      // Sales Person can only see proposals for their assigned leads
+      // Sales Person can only see proposals for their assigned deals
       if (user.RoleId === ROLES.SALES_PERSON) {
         filters.assignedToUserId = user.UserId;
       }
@@ -165,7 +160,7 @@ const ProposalService = {
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (proposal.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only access proposals for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError('You can only access proposals for deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -186,21 +181,21 @@ const ProposalService = {
   updateProposal: async (proposalId, updateData, user) => {
     try {
       const proposal = await ProposalModel.findById(proposalId);
-  
+
       if (!proposal) {
         throw new AppError('Proposal not found', HTTP_STATUS.NOT_FOUND);
       }
-  
+
       // Ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (proposal.AssignedToUserId !== user.UserId) {
           throw new AppError(
-            'You can only update proposals for leads assigned to you',
+            'You can only update proposals for deals assigned to you',
             HTTP_STATUS.FORBIDDEN
           );
         }
       }
-  
+
       // Draft-only update
       const isDraft = await ProposalModel.isDraft(proposalId);
       if (!isDraft) {
@@ -209,64 +204,64 @@ const ProposalService = {
           HTTP_STATUS.BAD_REQUEST
         );
       }
-  
+
       const oldValues = { ...proposal };
-  
+
       // 🔑 Fields that affect hash
       const hashFields = [
         'ProposalTitle',
         'ProposalAmount',
-        'Currency',        
+        'Currency',
         'PaymentTerms',
         'DeliveryTerms',
         'ProposalDocumentPath'
       ];
-  
+
       // Check if any hash field changed
       const hashFieldChanged = hashFields.some(
         field =>
           updateData[field] !== undefined &&
           updateData[field] !== proposal[field]
       );
-  
+
       // 👉 Only recompute & validate hash if needed
       if (hashFieldChanged) {
         const hashInput = {
-          OpportunityId: proposal.OpportunityId,
+          DealId: proposal.DealId,
           ProposalTitle: updateData.ProposalTitle ?? proposal.ProposalTitle,
           ProposalAmount: updateData.ProposalAmount ?? proposal.ProposalAmount,
-          Currency: updateData.Currency ?? proposal.Currency,          
+          Currency: updateData.Currency ?? proposal.Currency,
           PaymentTerms: updateData.PaymentTerms ?? proposal.PaymentTerms,
           DeliveryTerms: updateData.DeliveryTerms ?? proposal.DeliveryTerms,
           ProposalDocumentPath:
             updateData.ProposalDocumentPath ?? proposal.ProposalDocumentPath
         };
-  
+
         const newHash = generateProposalHash(hashInput);
-  
+
         // 🔥 IMPORTANT: Check against ALL versions except this one
         const duplicate =
-          await ProposalModel.findByOpportunityAndHashExcludingSelf(
-            proposal.OpportunityId,
+          await ProposalModel.findByDealAndHashExcludingSelf(
+            proposal.DealId,
             newHash,
             proposalId
           );
-  
+
         if (duplicate) {
           throw new AppError(
-            'Another proposal with the same content already exists for this opportunity.',
+            'Another proposal with the same content already exists for this deal.',
             HTTP_STATUS.BAD_REQUEST
           );
         }
-  
+
         updateData.ContentHash = newHash;
       }
-  
+
       // Perform update (non-hash fields update freely)
       await ProposalModel.update(proposalId, updateData);
-  
+
       const updatedProposal = await ProposalModel.findById(proposalId);
-  
+
       // Audit log
       await AuditLogModel.create({
         TableName: 'proposal',
@@ -276,12 +271,12 @@ const ProposalService = {
         NewValues: JSON.stringify(updatedProposal),
         ChangedBy: user.UserId
       });
-  
+
       logger.info('Proposal updated successfully', {
         proposalId,
         updatedBy: user.UserId
       });
-  
+
       return updatedProposal;
     } catch (error) {
       logger.error('Update proposal error:', error);
@@ -339,7 +334,7 @@ const ProposalService = {
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (proposal.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only submit proposals for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError('You can only submit proposals for deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -347,6 +342,25 @@ const ProposalService = {
       const isDraft = await ProposalModel.isDraft(proposalId);
       if (!isDraft) {
         throw new AppError('Only draft proposals can be submitted', HTTP_STATUS.BAD_REQUEST);
+      }
+
+      // Block submission if deal already has another active submitted/approved proposal
+      const conflictingProposal = await ProposalModel.hasActiveSubmittedProposal(
+        proposal.DealId,
+        proposalId
+      );
+
+      if (conflictingProposal) {
+        const statusLabel = {
+          2: 'Submitted',
+          3: 'Under Review',
+          4: 'Approved',
+        }[conflictingProposal.ProposalStatusId] || 'active';
+
+        throw new AppError(
+          `Cannot submit proposal. Proposal ${conflictingProposal.ProposalNumber} for this deal is already in "${statusLabel}" status. Only one active proposal per deal is allowed.`,
+          HTTP_STATUS.CONFLICT
+        );
       }
 
       // Validate required fields for submission
@@ -362,65 +376,22 @@ const ProposalService = {
         throw new AppError('Delivery terms are required for submission', HTTP_STATUS.BAD_REQUEST);
       }
 
-      // Check approval threshold
-      const requiresApproval = proposal.ProposalAmount > ProposalService.APPROVAL_THRESHOLD;
+      // All proposals require manager/admin approval
+      const newStatus = 3; // Under Review
+      const approvalMessage = `Proposal submitted for approval.`;
 
-      let newStatus;
-      let approvalMessage;
+      // TODO: Send email notification to managers/admins
 
-      if (requiresApproval) {
-        // Requires manager/admin approval
-        newStatus = 3; // Under Review
-        approvalMessage = `Proposal submitted for approval. Amount exceeds threshold of ${proposal.Currency} ${ProposalService.APPROVAL_THRESHOLD}.`;
-        
-        // TODO: Send email notification to managers/admins
-      } else {
-        // Auto-approve (below threshold)
-        newStatus = 4; // Approved
-        approvalMessage = `Proposal auto-approved. Amount below threshold of ${proposal.Currency} ${ProposalService.APPROVAL_THRESHOLD}.`;
-        
-        // Set approval details
-        await connection.query(
-          `UPDATE proposal 
-           SET ProposalStatusId = 4,
-               SubmittedAt = NOW(),
-               ApprovedByUserId = ?,
-               ApprovedAt = NOW(),
-               DecisionDate = NOW(),
-               UpdatedAt = NOW()
-           WHERE ProposalId = ?`,
-          [user.UserId, proposalId]
-        );
-
-        // Update opportunity stage to Negotiation
-        await connection.query(
-          'UPDATE opportunity SET OpportunityStageId = 4, UpdatedAt = NOW() WHERE OpportunityId = ?',
-          [proposal.OpportunityId]
-        );
-      }
-
-      if (requiresApproval) {
-        await connection.query(
-          `UPDATE proposal 
-           SET ProposalStatusId = ?, SubmittedAt = NOW(), UpdatedAt = NOW()
-           WHERE ProposalId = ?`,
-          [newStatus, proposalId]
-        );
-      }
-
-      // Log activity
       await connection.query(
-        `INSERT INTO activitylog (
-          LeadId, ActivityTypeId, Subject, Description, Direction,
-          ActivityDate, CreatedByUserId, IsDeleted, CreatedAt, UpdatedAt
-        ) VALUES (?, 4, ?, ?, 'Internal', NOW(), ?, 0, NOW(), NOW())`,
-        [
-          proposal.LeadId,
-          `Proposal Submitted: ${proposal.ProposalTitle}`,
-          approvalMessage,
-          user.UserId
-        ]
+        `UPDATE proposal 
+         SET ProposalStatusId = ?, SubmittedAt = NOW(), UpdatedAt = NOW()
+         WHERE ProposalId = ?`,
+        [newStatus, proposalId]
       );
+
+      await DealModel.moveToNegotiationStage(proposal.DealId, user.UserId, connection);
+
+      const accountId = await ProposalModel.getAccountIdByProposalId(proposalId);
 
       // Audit log
       await connection.query(
@@ -439,16 +410,13 @@ const ProposalService = {
 
       const updatedProposal = await ProposalModel.findById(proposalId);
 
-      logger.info('Proposal submitted', { 
-        proposalId, 
+      logger.info('Proposal submitted', {
+        proposalId,
         submittedBy: user.UserId,
-        requiresApproval 
       });
 
       return {
         proposal: updatedProposal,
-        requiresApproval,
-        threshold: ProposalService.APPROVAL_THRESHOLD,
         message: approvalMessage
       };
     } catch (error) {
@@ -483,11 +451,6 @@ const ProposalService = {
         throw new AppError('Only submitted or under review proposals can be approved', HTTP_STATUS.BAD_REQUEST);
       }
 
-      // Cannot approve own proposal (conflict of interest)
-      if (proposal.CreatedBy === user.UserId) {
-        throw new AppError('You cannot approve your own proposal', HTTP_STATUS.FORBIDDEN);
-      }
-
       // Approve proposal
       await connection.query(
         `UPDATE proposal 
@@ -500,25 +463,11 @@ const ProposalService = {
         [user.UserId, proposalId]
       );
 
-      // Update opportunity stage to Negotiation
-      await connection.query(
-        'UPDATE opportunity SET OpportunityStageId = 4, UpdatedAt = NOW() WHERE OpportunityId = ?',
-        [proposal.OpportunityId]
-      );
+      await ProposalModel.expireOtherProposals(proposal.DealId, proposalId, connection);
+      await DealModel.moveToClosedWonStage(proposal.DealId, user.UserId, connection);
 
-      // Log activity
-      await connection.query(
-        `INSERT INTO activitylog (
-          LeadId, ActivityTypeId, Subject, Description, Direction,
-          Outcome, ActivityDate, CreatedByUserId, IsDeleted, CreatedAt, UpdatedAt
-        ) VALUES (?, 4, ?, ?, 'Internal', 'Approved', NOW(), ?, 0, NOW(), NOW())`,
-        [
-          proposal.LeadId,
-          `Proposal Approved: ${proposal.ProposalTitle}`,
-          `Proposal approved by ${user.Name}. Amount: ${proposal.Currency} ${proposal.ProposalAmount}. ${approvalData.notes || ''}`,
-          user.UserId
-        ]
-      );
+      const accountId = await ProposalModel.getAccountIdByProposalId(proposalId);
+
 
       // Audit log
       await connection.query(
@@ -568,10 +517,31 @@ const ProposalService = {
         throw new AppError('Parent proposal not found', HTTP_STATUS.NOT_FOUND);
       }
 
+      const deal = await DealModel.findById(parentProposal.DealId);
+      if (!deal) {
+        throw new AppError('Deal not found', HTTP_STATUS.NOT_FOUND);
+      }
+
+      // Same deal stage gate as createProposal
+      if (deal.DealStageId === DEAL_STAGE.CLOSED_WON) {
+        throw new AppError(
+          'Cannot create a new proposal revision for a Closed Won deal',
+          HTTP_STATUS.BAD_REQUEST
+        );
+      }
+
+      // Parent deal must be Closed Lost (rejection always closes deal lost)
+      if (deal.DealStageId !== DEAL_STAGE.CLOSED_LOST) {
+        throw new AppError(
+          'A revision can only be created when the deal is in Closed Lost stage',
+          HTTP_STATUS.BAD_REQUEST
+        );
+      }
+
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (parentProposal.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only create revisions for proposals of leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError('You can only create revisions for proposals of deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -582,20 +552,20 @@ const ProposalService = {
       }
 
       const hashInput = {
-        OpportunityId: parentProposal.OpportunityId,
+        DealId: parentProposal.DealId,
         ProposalTitle: parentProposal.ProposalTitle + ' (Revised)',
         ProposalAmount: parentProposal.ProposalAmount,
-        Currency: parentProposal.Currency,        
+        Currency: parentProposal.Currency,
         PaymentTerms: parentProposal.PaymentTerms,
         DeliveryTerms: parentProposal.DeliveryTerms,
         ProposalDocumentPath: parentProposal.ProposalDocumentPath || ''
-      };      
+      };
       const contentHash = generateProposalHash(hashInput);
-      const versionno = await ProposalModel.getMaxVersionNo(parentProposal.OpportunityId);
+      const versionno = await ProposalModel.getMaxVersionNo(parentProposal.DealId);
 
       // Create new proposal (revision)
       const newProposalId = await ProposalModel.create({
-        OpportunityId: parentProposal.OpportunityId,
+        DealId: parentProposal.DealId,
         ProposalTitle: parentProposal.ProposalTitle + ' (Revised)',
         ProposalAmount: parentProposal.ProposalAmount,
         Currency: parentProposal.Currency,
@@ -608,30 +578,28 @@ const ProposalService = {
         ProposalStatusId: 1, // Draft
         ContentHash: contentHash,
         CreatedBy: user.UserId
-      });
+      }, connection);
 
-      // Log activity
-      await connection.query(
-        `INSERT INTO activitylog (
-          LeadId, ActivityTypeId, Subject, Description, Direction,
-          ActivityDate, CreatedByUserId, IsDeleted, CreatedAt, UpdatedAt
-        ) VALUES (?, 4, ?, ?, 'Internal', NOW(), ?, 0, NOW(), NOW())`,
-        [
-          parentProposal.LeadId,
-          `Proposal Revision Created: ${parentProposal.ProposalTitle}`,
-          `New version ${parentProposal.VersionNo + 1} created after rejection of version ${parentProposal.VersionNo}.`,
-          user.UserId
-        ]
-      );
+      // Transition parent proposal from Rejected → Rejected Expired
+      await ProposalModel.updateStatus(proposalId, 7, connection);
+
+
+      // After — forcibly moves deal back from Closed Lost to Proposal/Price Quote
+      await DealModel.moveToProposalStageForRevision(parentProposal.DealId, user.UserId, connection);
+
+
+      // #Todo AuditLog Insertion.
+
+
 
       await connection.commit();
 
       const newProposal = await ProposalModel.findById(newProposalId);
 
-      logger.info('Proposal revision created', { 
-        newProposalId, 
+      logger.info('Proposal revision created', {
+        newProposalId,
         parentProposalId: proposalId,
-        createdBy: user.UserId 
+        createdBy: user.UserId
       });
 
       return {
@@ -660,7 +628,7 @@ const ProposalService = {
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (proposal.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only upload documents for proposals of leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError('You can only upload documents for proposals of deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -698,7 +666,7 @@ const ProposalService = {
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (proposal.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only download documents for proposals of leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError('You can only download documents for proposals of deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -735,18 +703,37 @@ const ProposalService = {
 
       const appointment = await AppointmentModel.findById(appointmentId);
 
-      if (!appointment){
+      if (!appointment) {
         throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
+      }
+
+      // Check if appointment has DealId
+      if (!appointment.DealId) {
+        throw new AppError(
+          'Appointment is not associated with any deal',
+          HTTP_STATUS.BAD_REQUEST
+        );
+      }
+
+      // Check if proposal DealId matches appointment DealId
+      if (proposal.DealId !== appointment.DealId) {
+        throw new AppError(
+          'Proposal and appointment must belong to the same deal',
+          HTTP_STATUS.BAD_REQUEST
+        );
       }
 
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
         if (proposal.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only link appointments for proposals of leads assigned to you', HTTP_STATUS.FORBIDDEN);
+          throw new AppError(
+            'You can only link appointments for proposals of deals assigned to you',
+            HTTP_STATUS.FORBIDDEN
+          );
         }
       }
 
-      // Service
+      // Check if already linked
       const alreadyLinked = await ProposalAppointmentModel.exists(
         proposalId,
         appointmentId
@@ -761,7 +748,12 @@ const ProposalService = {
 
       await ProposalAppointmentModel.create(proposalId, appointmentId);
 
-      logger.info('Appointment linked to proposal', { proposalId, appointmentId, linkedBy: user.UserId });
+      logger.info('Appointment linked to proposal', {
+        proposalId,
+        appointmentId,
+        dealId: proposal.DealId,
+        linkedBy: user.UserId
+      });
 
       return { success: true, message: 'Appointment linked successfully' };
     } catch (error) {
@@ -770,27 +762,58 @@ const ProposalService = {
     }
   },
 
-  // Get proposals by opportunity
-  getProposalsByOpportunity: async (opportunityId, user) => {
+  // Get proposals by deal
+  getProposalsByDeal: async (dealId, user) => {
     try {
-      const opportunity = await OpportunityModel.findById(opportunityId);
+      const deal = await DealModel.findById(dealId);
 
-      if (!opportunity) {
-        throw new AppError('Opportunity not found', HTTP_STATUS.NOT_FOUND);
+      if (!deal) {
+        throw new AppError('Deal not found', HTTP_STATUS.NOT_FOUND);
       }
 
-      // In-memory ownership check
+      // Ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
-        if (opportunity.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only access proposals for opportunities of leads assigned to you', HTTP_STATUS.FORBIDDEN);
+        if (deal.AssignedToUserId !== user.UserId) {
+          throw new AppError('You can only access proposals for deals assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
-      const proposals = await ProposalModel.getByOpportunityId(opportunityId);
+      const proposals = await ProposalModel.getByDealId(dealId);
 
       return proposals;
     } catch (error) {
-      logger.error('Get proposals by opportunity error:', error);
+      logger.error('Get proposals by deal error:', error);
+      throw error;
+    }
+  },
+
+  // Get all proposal-appointment links
+  getAllProposalAppointments: async (filters, user) => {
+    try {
+      // Sales Person can only see their own links indirectly if needed, 
+      // but usually this page might be for Managers/Admins.
+      // For now, let's keep it simple or add Role check if necessary.
+
+      const result = await ProposalAppointmentModel.getAll(filters);
+
+      return result;
+    } catch (error) {
+      logger.error('Get all proposal appointments error:', error);
+      throw error;
+    }
+  },
+
+  // Delete proposal-appointment link
+  deleteProposalAppointmentLink: async (proposalAppointmentId, user) => {
+    try {
+      const success = await ProposalAppointmentModel.delete(proposalAppointmentId);
+      if (!success) {
+        throw new AppError('Link not found or already deleted', HTTP_STATUS.NOT_FOUND);
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Delete proposal appointment link error:', error);
       throw error;
     }
   },
@@ -852,9 +875,11 @@ const ProposalService = {
           p.RejectedAt,
           p.CreatedAt,
           ps.StatusName,
-          o.OpportunityName,
-          l.CustomerName,
-          l.CompanyName,
+          d.DealName,
+          d.DealNumber,
+          a.AccountName,
+          c.FirstName as ContactFirstName,
+          c.LastName as ContactLastName,
           creator.Name as CreatedBy,
           approver.Name as ApprovedBy,
           DATEDIFF(
@@ -863,8 +888,9 @@ const ProposalService = {
           ) as DaysToDecision
         FROM proposal p
         LEFT JOIN proposalstatus ps ON p.ProposalStatusId = ps.ProposalStatusId
-        LEFT JOIN opportunity o ON p.OpportunityId = o.OpportunityId
-        LEFT JOIN leads l ON o.LeadId = l.LeadId
+        LEFT JOIN deals d ON p.DealId = d.DealId
+        LEFT JOIN accounts a ON d.AccountId = a.AccountId
+        LEFT JOIN contacts c ON d.ContactId = c.ContactId
         LEFT JOIN users creator ON p.CreatedBy = creator.UserId
         LEFT JOIN users approver ON p.ApprovedByUserId = approver.UserId
         WHERE p.IsDeleted = 0
@@ -874,7 +900,7 @@ const ProposalService = {
 
       // Sales Person filter
       if (user.RoleId === ROLES.SALES_PERSON) {
-        query += ' AND l.AssignedToUserId = ?';
+        query += ' AND d.AssignedToUserId = ?';
         params.push(user.UserId);
       }
 

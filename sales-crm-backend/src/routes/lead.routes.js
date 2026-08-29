@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const LeadController = require('../controllers/lead.controller');
 const leadValidation = require('../validations/leadValidation');
@@ -21,8 +21,83 @@ router.get('/types', LeadController.getLeadTypes);
 // Get lead statuses (all authenticated users)
 router.get('/statuses', LeadController.getLeadStatuses);
 
-// Get Qualification statuses (all authenticated users)
-router.get('/Qstatuses', LeadController.getLeadStatuses);
+// Get lead services (all authenticated users)
+router.get('/services', LeadController.getLeadServices);
+
+// Get follow-up types (all authenticated users)
+router.get('/follow-up-types', LeadController.getLeadFollowUpTypes);
+
+// ==================== LEAD SOURCE CRUD ====================
+router.get('/sources/:sourceId', LeadController.getLeadSourceById);
+router.post('/sources', LeadController.createLeadSource);
+router.put('/sources/:sourceId', LeadController.updateLeadSource);
+router.delete('/sources/:sourceId', LeadController.deleteLeadSource);
+
+// ==================== LEAD TYPE CRUD ====================
+router.get('/types/:typeId', LeadController.getLeadTypeById);
+router.post('/types', LeadController.createLeadType);
+router.put('/types/:typeId', LeadController.updateLeadType);
+router.delete('/types/:typeId', LeadController.deleteLeadType);
+
+// ==================== LEAD STATUS CRUD ====================
+router.get('/statuses/:statusId', LeadController.getLeadStatusById);
+router.post('/statuses', LeadController.createLeadStatus);
+router.put('/statuses/:statusId', LeadController.updateLeadStatus);
+router.delete('/statuses/:statusId', LeadController.deleteLeadStatus);
+
+// ==================== LEAD SERVICE REQUIRED CRUD ====================
+router.get('/services/:serviceId', LeadController.getLeadServiceById);
+router.post('/services', LeadController.createLeadService);
+router.put('/services/:serviceId', LeadController.updateLeadService);
+router.delete('/services/:serviceId', LeadController.deleteLeadService);
+
+// ==================== LEAD FOLLOW-UP TYPE CRUD ====================
+router.get('/follow-up-types/:followUpTypeId', LeadController.getLeadFollowUpTypeById);
+router.post('/follow-up-types', LeadController.createLeadFollowUpType);
+router.put('/follow-up-types/:followUpTypeId', LeadController.updateLeadFollowUpType);
+router.delete('/follow-up-types/:followUpTypeId', LeadController.deleteLeadFollowUpType);
+
+// ==================== LEAD FOLLOW-UP CRUD ====================
+router.get(
+  '/:id/followups',
+  leadValidation.getLeadById,
+  validate,
+  LeadController.getLeadFollowUps
+);
+router.get(
+  '/:id/followups/:followUpId',
+  leadValidation.getFollowUp,
+  validate,
+  LeadController.getFollowUpById
+);
+router.post(
+  '/:id/followups',
+  leadValidation.createLeadFollowUp,
+  validate,
+  LeadController.createLeadFollowUp
+);
+router.put(
+  '/:id/followups/:followUpId',
+  leadValidation.updateLeadFollowUp,
+  validate,
+  LeadController.updateLeadFollowUp
+);
+router.delete(
+  '/:id/followups/:followUpId',
+  leadValidation.getFollowUp,
+  validate,
+  LeadController.deleteLeadFollowUp
+);
+
+// ==================== LEAD CONVERSION ====================
+
+// Convert lead to Account, Contact, and optionally Deal
+router.post(
+  '/:id/convert',
+  checkPermission(PERMISSIONS.CONVERT_LEAD),
+  LeadController.convertLead
+);
+
 // ==================== BASIC LEAD CRUD ====================
 
 // Create lead
@@ -75,54 +150,6 @@ router.post(
   validate,
   checkPermission(PERMISSIONS.ASSIGN_LEAD),
   LeadController.assignLead
-);
-
-// ==================== BUSINESS INFO MODULE ====================
-
-// Add or update business info (with ownership check)
-router.post(
-  '/:id/business-info',
-  leadValidation.addOrUpdateBusinessInfo,
-  validate,
-  checkPermission(PERMISSIONS.UPDATE_LEAD),
-  LeadController.addOrUpdateBusinessInfo
-);
-
-router.put(
-  '/:id/business-info',
-  leadValidation.addOrUpdateBusinessInfo,
-  validate,
-  checkPermission(PERMISSIONS.UPDATE_LEAD),
-  LeadController.addOrUpdateBusinessInfo
-);
-
-// ==================== QUALIFICATION MODULE ====================
-
-// Get qualification details (Lead + Business Info)
-router.get(
-  '/:id/qualification-details',
-  leadValidation.getQualificationDetails,
-  validate,
-  checkPermission(PERMISSIONS.QUALIFY_LEAD),
-  LeadController.getQualificationDetails
-);
-
-// Accept qualification (Qualified - creates qualification record)
-router.post(
-  '/:id/qualify/accept',
-  leadValidation.acceptQualification,
-  validate,
-  checkPermission(PERMISSIONS.QUALIFY_LEAD),
-  LeadController.acceptQualification
-);
-
-// Reject qualification (Unqualified - no qualification record)
-router.post(
-  '/:id/qualify/reject',
-  leadValidation.rejectQualification,
-  validate,
-  checkPermission(PERMISSIONS.QUALIFY_LEAD),
-  LeadController.rejectQualification
 );
 
 // ==================== EMAIL MODULE ====================

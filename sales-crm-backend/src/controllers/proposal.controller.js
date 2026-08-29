@@ -1,6 +1,7 @@
 const { asyncHandler } = require('../middlewares/errorHandler.middleware');
 const ProposalService = require('../services/proposalService');
 const LostOrderService = require('../services/lostOrderService');
+const { AppError } = require('../middlewares/errorHandler.middleware');
 const { HTTP_STATUS } = require('../config/constants');
 
 const ProposalController = {
@@ -19,19 +20,21 @@ const ProposalController = {
 
   // Get all proposals
   getAllProposals: asyncHandler(async (req, res) => {
-    const { 
-      page, limit, opportunityId, proposalStatusId, 
-      minAmount, maxAmount, search 
+    const {
+      page, limit, dealId, proposalStatusId,
+      minAmount, maxAmount, search, excludeConverted
     } = req.query;
 
     const filters = {
       page: page || 1,
       limit: limit || 10,
-      opportunityId,
+      dealId,
       proposalStatusId,
       minAmount,
       maxAmount,
-      search
+      search,
+      excludeConverted: excludeConverted === 'true',
+      excludeAppointmentId: req.query.excludeAppointmentId
     };
 
     const result = await ProposalService.getAllProposals(filters, req.user);
@@ -167,6 +170,24 @@ const ProposalController = {
 
   // ==================== LINKING & RELATIONSHIPS ====================
 
+  // Get all proposal-appointment links
+  getAllProposalAppointments: asyncHandler(async (req, res) => {
+    const { page, limit, search } = req.query;
+    const filters = {
+      page: page || 1,
+      limit: limit || 10,
+      search
+    };
+
+    const result = await ProposalService.getAllProposalAppointments(filters, req.user);
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Proposal-appointment links retrieved successfully',
+      ...result
+    });
+  }),
+
   // Link appointment to proposal
   linkAppointment: asyncHandler(async (req, res) => {
     const { appointmentId } = req.body;
@@ -182,10 +203,22 @@ const ProposalController = {
     });
   }),
 
-  // Get proposals by opportunity
-  getProposalsByOpportunity: asyncHandler(async (req, res) => {
-    const proposals = await ProposalService.getProposalsByOpportunity(
-      req.params.opportunityId,
+  // Delete proposal-appointment link
+  deleteProposalAppointmentLink: asyncHandler(async (req, res) => {
+    const { linkId } = req.params;
+
+    await ProposalService.deleteProposalAppointmentLink(linkId, req.user);
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Proposal-appointment link deleted successfully'
+    });
+  }),
+
+  // Get proposals by deal
+  getProposalsByDeal: asyncHandler(async (req, res) => {
+    const proposals = await ProposalService.getProposalsByDeal(
+      req.params.dealId,
       req.user
     );
 

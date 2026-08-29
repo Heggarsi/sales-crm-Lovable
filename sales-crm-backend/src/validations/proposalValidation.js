@@ -3,9 +3,9 @@ const { body, param, query } = require('express-validator');
 const proposalValidation = {
   // Create proposal
   createProposal: [
-    body('OpportunityId')
-      .notEmpty().withMessage('Opportunity ID is required')
-      .isInt({ min: 1 }).withMessage('Invalid Opportunity ID'),
+    body('DealId')
+      .notEmpty().withMessage('Deal ID is required')
+      .isInt({ min: 1 }).withMessage('Invalid Deal ID'),
     
     body('ProposalTitle')
       .trim()
@@ -182,10 +182,10 @@ const proposalValidation = {
       .isInt({ min: 1 }).withMessage('Invalid appointment ID')
   ],
 
-  // Get proposals by opportunity
-  getProposalsByOpportunity: [
-    param('opportunityId')
-      .isInt({ min: 1 }).withMessage('Invalid opportunity ID')
+  // Get proposals by deal
+  getProposalsByDeal: [
+    param('dealId')
+      .isInt({ min: 1 }).withMessage('Invalid deal ID')
   ],
 
   // Get expiring proposals

@@ -1,0 +1,202 @@
+===========================================================================
+TECHNICAL NOTE — LEADS MODULE : DESIGN DECISIONS
+===========================================================================
+
+This note covers ONLY the Leads module. It explains the main design
+decisions behind how the module is built.
+
+---------------------------------------------------------------------------
+1. LAYERED ARCHITECTURE (Route -> Controller -> Service -> Model)
+---------------------------------------------------------------------------
+The leads module is split into four layers, each with a single
+responsibility:
+
+  Route      (lead.routes.js)  : maps HTTP paths to controllers, wires in
+                                 middleware (auth, validation, permissions).
+  Controller (lead.controller.js): thin HTTP adapters. No business logic.
+                                 They read req.body/req.user, call the
+                                 service, and shape the JSON response.
+  Service    (leadService.js)  : ALL business rules live here (role checks,
+                                 ownership checks, duplicate detection,
+                                 conversion transaction). Throws AppError.
+  Model      (LeadsModel.js)   : raw parameterised SQL against the database
+                                 using the mysql2 promise pool.
+
+WHY?
+  - Keeps SQL out of controllers, so HTTP concerns don't leak into data
+    access.
+  - Centralises business rules in one place (the service), making rules
+    testable and consistent for every route that uses them.
+  - Controllers stay small and easy to read; each layer can change
+    independently.
+
+---------------------------------------------------------------------------
+2. DUPLICATE LEAD DETECTION (Email only)
+---------------------------------------------------------------------------
+Duplicates are prevented at TWO levels:
+
+  a) DATABASE (enforced, the source of truth)
+       schema.sql, leads table:
+         UNIQUE KEY uk_leads_email (Email)
+       -> a second row with the same Email cannot be inserted.
+
+  b) SERVICE (friendly, pre-emptive)
+       LeadService.createLead: if Email is supplied, it calls
+       LeadModel.findByEmail. If a matching lead exists, it throws:
+           AppError('A lead with this email already exists', 409 CONFLICT)
+       LeadService.updateLead: same check but EXCLUDES the current lead
+       (existingLead.LeadId !== leadId), so saving a lead without changing
+       its email does not trigger a false duplicate.
+
+WHY email only?
+  - Email is a natural business identity for a lead and is enforced as a
+    unique column in the schema.
+  - Phone / Mobile / CompanyName are intentionally NOT unique: the same
+    company can legitimately generate multiple contacts/leads, and phone
+    fields are optional and often missing.
+
+WHY pre-check in the service AND rely on the DB unique key?
+  - The service check returns a clean, user-friendly 409 message instead of
+    surfacing a raw MySQL error code.
+  - The DB unique key is kept as the final safety net against race
+    conditions. If the DB constraint ever fires anyway, the global error
+    handler (errorHandler.middleware.js) catches ER_DUP_ENTRY and converts
+    it to a 409 with a readable message.
+
+---------------------------------------------------------------------------
+3. ERROR HANDLING (uniform error reporting)
+---------------------------------------------------------------------------
+Every service method throws AppError(message, statusCode) for expected
+"operational" failures. All errors flow to a single global error handler
+(errorHandler.middleware.js) which returns a uniform JSON body:
+
+   { success: false, message: "...", errors: [...] , stack? }
+
+  - AppError carries its own HTTP status.
+  - Known DB errors are mapped centrally:
+      ER_DUP_ENTRY          -> 409 Conflict
+      ER_NO_REFERENCED_ROW_2-> 400 (missing referenced record)
+      ER_DATA_TOO_LONG      -> 400
+  - JWT errors             -> 401; unknown routes -> 404; otherwise 500.
+  - stack is only included when NODE_ENV=development.
+
+WHY a central handler?
+  - Controllers/services can throw rich errors without repeating response
+    shaping code; the API gives clients one consistent error contract.
+
+---------------------------------------------------------------------------
+4. VALIDATION (two layers)
+---------------------------------------------------------------------------
+  a) FIELD VALIDATION (express-validator, leadValidation.js)
+       - FirstName/LastName required with length constraints.
+       - Email format, Phone/AlternatePhone regex, decimal, int checks.
+       - SourceId and LeadTypeId are required.
+     A validate middleware collects all errors and returns 400 with
+     { errors: [{ field, message }] }.
+
+  b) BUSINESS VALIDATION (service layer)
+       - Assignment target must be a Sales Person.
+       - A Sales Person can only act on their own assigned leads.
+       - Only QUALIFIED leads can be converted; already-converted leads
+         are rejected.
+
+WHY split them?
+  - Validation middleware handles "is the submitted data well-formed?"
+  - The service handles "is this operation valid for this user/state?"
+  - Keeps format checks close to the API boundary and business rules close
+    to the logic that enforces them.
+
+---------------------------------------------------------------------------
+5. AUTHENTICATION & AUTHORIZATION
+---------------------------------------------------------------------------
+  - Every leads route requires authentication (router.use(authenticate)).
+    The client must send:  Authorization: Bearer <JWT>.
+  - authenticate (auth.middleware.js) verifies the JWT, reloads the user
+    from DB, and rejects inactive/deleted users (401).
+  - Authorization uses RBAC: checkPermission(PERMISSIONS.X) on each route.
+  - Row-level security: for Sales Persons, leadService enforces ownership on
+    get/update/delete/convert/follow-ups by comparing
+    lead.AssignedToUserId === user.UserId.
+
+WHY ownership in the service, not just the route middleware?
+  - Row-level (record-level) checks need the lead row; doing it in the
+    service keeps data-access logic together and avoids an extra query in
+    middleware.
+
+---------------------------------------------------------------------------
+6. LEAD CONVERSION (transactional ACID)
+---------------------------------------------------------------------------
+convertLead (leadService.js) runs inside a single DB TRANSACTION:
+  1. Fetch the lead; reject if already converted or not QUALIFIED.
+  2. Reuse an existing Account by CompanyName, or create a new Account.
+  3. Create a Contact from the lead's details (generates a unique
+     ContactNumber).
+  4. Optionally create a Deal.
+  5. Update the lead to Converted with the created IDs.
+On ANY error the transaction is rolled back, so partial records are never
+left behind.
+
+WHY a transaction?
+  - Conversion writes to several tables (accounts, contacts, deals, leads);
+    a failure mid-way must leave no orphaned/inconsistent rows.
+
+---------------------------------------------------------------------------
+7. LEAD NUMBER (auto-generated identifier)
+---------------------------------------------------------------------------
+Each lead gets a unique lead number: LeadModel.create calls
+helpers.generateUniqueNumber('LEAD'). A UNIQUE index on LeadNumber backs
+this at the database level.
+
+WHY a dedicated number?
+  - It is a stable, customer-facing reference independent of the internal
+    auto-increment LeadId, and remains unique even after soft deletes.
+
+---------------------------------------------------------------------------
+8. SOFT DELETE + USER-SPECIFIC UNIQUENESS
+---------------------------------------------------------------------------
+Deletes are SOFT deletes (leads delete: IsDeleted=1, IsActive=0). All reads
+filter on IsDeleted=0, and the duplicate lookup (findByEmail) also filters
+IsDeleted=0 so soft-deleted leads don't block new ones at the service level.
+
+NOTE / KNOWN LIMITATION:
+  The unique DB index on Email still applies to soft-deleted rows at the
+  database level (MySQL does not support partial unique indexes). So if you
+  hard-insert a lead with an email that belongs to a soft-deleted row, the
+  DB UNIQUE constraint (uk_leads_email) could still reject it. If reusing
+  emails of deleted leads must be supported, a partial-index equivalent or
+  a "deleted email reservation" mechanism would be required.
+
+---------------------------------------------------------------------------
+9. RESPONSIVE FRONTEND DECISION
+---------------------------------------------------------------------------
+The list switches between two layouts by breakpoint:
+  - Below lg (1024px): card layout -> avoids a sideways-scrolling table,
+    which is bad on phones/tablets.
+  - lg and above    : data table    -> best density on wide screens.
+The actions dropdown is shared by both layouts (single component), so there
+is no duplicated behaviour.
+Page-level scrollbars are suppressed (scrollbar-hide utility) and the app
+is locked to the viewport height whose main content scrolls internally,
+giving a clean "no scrollbars" experience at every screen size.
+
+---------------------------------------------------------------------------
+10. API CONTRACT (summary for the Leads module)
+---------------------------------------------------------------------------
+  POST   /api/leads                       create lead
+  GET    /api/leads                       list (filters/pagination)
+  GET    /api/leads/:id                   get one
+  PUT    /api/leads/:id                   update
+  DELETE /api/leads/:id                   delete (soft)
+  POST   /api/leads/:id/assign            assign to sales person
+  POST   /api/leads/:id/convert           convert to Account/Contact/Deal
+  POST   /api/leads/:id/send-intro-email  send introduction email
+  GET    /api/leads/:id/followups         list follow-ups
+  POST   /api/leads/:id/followups         create follow-up
+  PUT    /api/leads/:id/followups/:fid    update follow-up
+  DELETE /api/leads/:id/followups/:fid    delete follow-up
+  Lookups: /api/leads/sources, /types, /statuses, /services,
+           /follow-up-types (GET + CRUD)
+
+Response envelope: success, message, data (and errors on failure).
+
+===========================================================================

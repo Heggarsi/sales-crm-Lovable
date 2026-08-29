@@ -2,7 +2,7 @@ const crypto = require('crypto');
 
 const generateProposalHash = (data) => {
   const relevantData = {
-    OpportunityId: data.OpportunityId,
+    DealId: data.DealId,
     ProposalTitle: data.ProposalTitle,
     ProposalAmount: Number(data.ProposalAmount),
     Currency: data.Currency,    

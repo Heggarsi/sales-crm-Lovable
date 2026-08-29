@@ -67,15 +67,15 @@ router.delete(
   ActivityController.deleteActivity
 );
 
-// ==================== LEAD-SPECIFIC ENDPOINTS ====================
+// ==================== APPOINTMENT-SPECIFIC ENDPOINTS ====================
 
-// Get activities by lead
+// Get activities by appointment
 router.get(
-  '/lead/:leadId',
-  activityValidation.getActivitiesByLead,
+  '/appointment/:appointmentId',
+  activityValidation.getActivitiesByAppointment,
   validate,
   checkPermission(PERMISSIONS.READ_ACTIVITY),
-  ActivityController.getActivitiesByLead
+  ActivityController.getActivitiesByAppointment
 );
 
 module.exports = router;

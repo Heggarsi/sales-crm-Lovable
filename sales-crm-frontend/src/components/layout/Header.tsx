@@ -1,4 +1,6 @@
-import { Bell, ChevronRight, Search, User } from "lucide-react";
+import { ChevronRight, Search, User, LayoutDashboard } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,15 +13,27 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { getAuthUser } from "@/lib/auth";
 
 interface HeaderProps {
   breadcrumbs: string[];
   userName: string;
   userRole: string;
   onLogout: () => void;
+  showBackButton?: boolean;
 }
 
-export function Header({ breadcrumbs, userName, userRole, onLogout }: HeaderProps) {
+export function Header({ breadcrumbs, userName, userRole, onLogout, showBackButton }: HeaderProps) {
+  const navigate = useNavigate();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const authUser = getAuthUser();
   const initials = userName
     .split(" ")
     .map((n) => n[0])
@@ -28,9 +42,21 @@ export function Header({ breadcrumbs, userName, userRole, onLogout }: HeaderProp
     .slice(0, 2);
 
   return (
+    <>
     <header className="h-16 bg-card border-b border-border flex items-center justify-between px-6">
-      {/* Breadcrumb */}
-      <div className="breadcrumb">
+      {/* Left Section: Breadcrumb or Back Button */}
+      <div className="flex items-center gap-4">
+        {showBackButton && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2 font-medium"
+            onClick={() => navigate("/dashboard")}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            Back to Dashboard
+          </Button>
+        )}
         {breadcrumbs.map((crumb, index) => (
           <span key={index} className="flex items-center gap-2">
             {index > 0 && <ChevronRight className="w-4 h-4 breadcrumb-separator" />}
@@ -58,44 +84,6 @@ export function Header({ breadcrumbs, userName, userRole, onLogout }: HeaderProp
           />
         </div>
 
-        {/* Notifications */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-destructive rounded-full text-[10px] text-destructive-foreground flex items-center justify-center font-medium">
-                3
-              </span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80">
-            <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="flex flex-col items-start gap-1 py-3">
-              <span className="font-medium">New lead assigned</span>
-              <span className="text-sm text-muted-foreground">
-                John Smith has been assigned to you
-              </span>
-              <span className="text-xs text-muted-foreground">2 minutes ago</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem className="flex flex-col items-start gap-1 py-3">
-              <span className="font-medium">Appointment reminder</span>
-              <span className="text-sm text-muted-foreground">
-                Meeting with Acme Corp in 1 hour
-              </span>
-              <span className="text-xs text-muted-foreground">1 hour ago</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem className="flex flex-col items-start gap-1 py-3">
-              <span className="font-medium">Proposal approved</span>
-              <span className="text-sm text-muted-foreground">
-                TechStart Inc accepted your proposal
-              </span>
-              <span className="text-xs text-muted-foreground">3 hours ago</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* User Menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-3 h-auto py-2 px-3">
@@ -115,11 +103,11 @@ export function Header({ breadcrumbs, userName, userRole, onLogout }: HeaderProp
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel>My Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setProfileOpen(true)}>
               <User className="w-4 h-4 mr-2" />
               Profile
             </DropdownMenuItem>
-            <DropdownMenuItem>Settings</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate("/settings")}>Settings</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onLogout} className="text-destructive">
               Logout
@@ -128,5 +116,32 @@ export function Header({ breadcrumbs, userName, userRole, onLogout }: HeaderProp
         </DropdownMenu>
       </div>
     </header>
+    <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>User Profile</DialogTitle>
+          <DialogDescription>Logged-in user details from local storage.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <ProfileRow label="User ID" value={authUser?.UserId} />
+          <ProfileRow label="Name" value={authUser?.Name} />
+          <ProfileRow label="Email" value={authUser?.Email} />
+          <ProfileRow label="Role" value={userRole} />
+          <ProfileRow label="Role ID" value={authUser?.RoleId} />
+          <ProfileRow label="Created At" value={authUser?.CreatedAt} />
+          <ProfileRow label="Created By" value={authUser?.CreatedBy ?? "N/A"} />
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
+  );
+}
+
+function ProfileRow({ label, value }: { label: string; value?: string | number | null }) {
+  return (
+    <div className="grid grid-cols-[120px_1fr] gap-3 rounded-md border border-border px-3 py-2">
+      <span className="font-medium text-muted-foreground">{label}</span>
+      <span className="break-words text-foreground">{value || "N/A"}</span>
+    </div>
   );
 }

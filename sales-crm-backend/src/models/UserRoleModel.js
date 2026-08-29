@@ -41,6 +41,63 @@ const UserRoleModel = {
       logger.error('Error finding role by name:', error);
       throw error;
     }
+  },
+
+  // Create new role
+  create: async (roleData) => {
+    try {
+      const { RoleName, Description } = roleData;
+      const [result] = await pool.query(
+        'INSERT INTO userrole (RoleName, Description, IsActive) VALUES (?, ?, 1)',
+        [RoleName, Description || null]
+      );
+      return result.insertId;
+    } catch (error) {
+      logger.error('Error creating role:', error);
+      throw error;
+    }
+  },
+
+  // Update role
+  update: async (roleId, roleData) => {
+    try {
+      const fields = [];
+      const params = [];
+      const allowedFields = ['RoleName', 'Description', 'IsActive'];
+
+      allowedFields.forEach(field => {
+        if (roleData[field] !== undefined) {
+          fields.push(`${field} = ?`);
+          params.push(roleData[field]);
+        }
+      });
+
+      if (fields.length === 0) return false;
+
+      params.push(roleId);
+      const [result] = await pool.query(
+        `UPDATE userrole SET ${fields.join(', ')} WHERE RoleId = ?`,
+        params
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      logger.error('Error updating role:', error);
+      throw error;
+    }
+  },
+
+  // Delete role (soft delete)
+  delete: async (roleId) => {
+    try {
+      const [result] = await pool.query(
+        'UPDATE userrole SET IsActive = 0 WHERE RoleId = ?',
+        [roleId]
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      logger.error('Error deleting role:', error);
+      throw error;
+    }
   }
 };
 

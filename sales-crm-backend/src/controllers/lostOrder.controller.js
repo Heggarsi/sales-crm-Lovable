@@ -5,14 +5,15 @@ const { HTTP_STATUS } = require('../config/constants');
 const LostOrderController = {
   // Get all lost orders
   getAllLostOrders: asyncHandler(async (req, res) => {
-    const { page, limit, reason, competitorWon, search } = req.query;
+    const { page, limit, reason, competitorWon, search, dealId } = req.query;
 
     const filters = {
       page: page || 1,
       limit: limit || 10,
       reason,
       competitorWon,
-      search
+      search,
+      dealId
     };
 
     const result = await LostOrderService.getAllLostOrders(filters, req.user);

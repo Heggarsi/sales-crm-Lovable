@@ -169,12 +169,91 @@ const UserService = {
     }
   },
 
+  // Get role by ID
+  getRoleById: async (roleId) => {
+    try {
+      const role = await UserRoleModel.findById(roleId);
+      if (!role) {
+        throw new AppError('Role not found', HTTP_STATUS.NOT_FOUND);
+      }
+      return role;
+    } catch (error) {
+      logger.error('Get role by ID error:', error);
+      throw error;
+    }
+  },
+
   // Get sales persons (for lead assignment)
   getSalesPersons: async () => {
     try {
       return await UserModel.getUsersByRole(ROLES.SALES_PERSON);
     } catch (error) {
       logger.error('Get sales persons error:', error);
+      throw error;
+    }
+  },
+
+  // Create role
+  createRole: async (roleData) => {
+    try {
+      const { RoleName } = roleData;
+      
+      const existing = await UserRoleModel.findByName(RoleName);
+      if (existing) {
+        throw new AppError('Role name already exists', HTTP_STATUS.CONFLICT);
+      }
+
+      const roleId = await UserRoleModel.create(roleData);
+      const newRole = await UserRoleModel.findById(roleId);
+
+      logger.info('Role created successfully', { roleId });
+      return newRole;
+    } catch (error) {
+      logger.error('Create role error:', error);
+      throw error;
+    }
+  },
+
+  // Update role
+  updateRole: async (roleId, roleData) => {
+    try {
+      const role = await UserRoleModel.findById(roleId);
+      if (!role) {
+        throw new AppError('Role not found', HTTP_STATUS.NOT_FOUND);
+      }
+
+      if (roleData.RoleName) {
+        const existing = await UserRoleModel.findByName(roleData.RoleName);
+        if (existing && existing.RoleId !== parseInt(roleId)) {
+          throw new AppError('Role name already exists', HTTP_STATUS.CONFLICT);
+        }
+      }
+
+      await UserRoleModel.update(roleId, roleData);
+      const updatedRole = await UserRoleModel.findById(roleId);
+
+      logger.info('Role updated successfully', { roleId });
+      return updatedRole;
+    } catch (error) {
+      logger.error('Update role error:', error);
+      throw error;
+    }
+  },
+
+  // Delete role
+  deleteRole: async (roleId) => {
+    try {
+      const role = await UserRoleModel.findById(roleId);
+      if (!role) {
+        throw new AppError('Role not found', HTTP_STATUS.NOT_FOUND);
+      }
+
+      await UserRoleModel.delete(roleId);
+
+      logger.info('Role deleted successfully', { roleId });
+      return true;
+    } catch (error) {
+      logger.error('Delete role error:', error);
       throw error;
     }
   }

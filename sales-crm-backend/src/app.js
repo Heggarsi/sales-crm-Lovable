@@ -41,16 +41,16 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Logging middleware
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan('dev'));
-} else {
-  app.use(morgan('combined', {
-    stream: {
-      write: (message) => logger.info(message.trim())
-    }
-  }));
-}
+// // Logging middleware
+// if (process.env.NODE_ENV === 'development') {
+//   app.use(morgan('dev'));
+// } else {
+//   app.use(morgan('combined', {
+//     stream: {
+//       write: (message) => logger.info(message.trim())
+//     }
+//   }));
+// }
 
 // Health check route
 app.get('/health', (req, res) => {
@@ -65,15 +65,17 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/users', require('./routes/user.routes'));
 app.use('/api/leads', require('./routes/lead.routes'));
+app.use('/api/accounts', require('./routes/account.routes'));
+app.use('/api/contacts', require('./routes/contact.routes'));
+app.use('/api/deals', require('./routes/deal.routes'));
 app.use('/api/appointments', require('./routes/appointment.routes'));
-app.use('/api/mom', require('./routes/mom.routes'));                   
-app.use('/api/activities', require('./routes/activity.routes'));       
-app.use('/api/opportunities', require('./routes/opportunity.routes'));       
-app.use('/api/lost-opportunities', require('./routes/lostOpportunity.routes'));
+app.use('/api/activities', require('./routes/activity.routes'));
 app.use('/api/proposals', require('./routes/proposal.routes'));
-app.use('/api/lost-orders', require('./routes/lostOrder.routes'));
+app.use('/api/lostorders', require('./routes/lostOrder.routes'));
 app.use('/api/salesorders', require('./routes/salesorder.routes'));
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
+app.use('/api/lookups', require('./routes/lookup.routes'));
+app.use('/api/audit', require('./routes/audit.routes'));
 
 // 404 handler
 app.use(notFound);

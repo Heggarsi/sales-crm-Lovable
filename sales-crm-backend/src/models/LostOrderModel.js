@@ -5,7 +5,7 @@ const LostOrderModel = {
   // Create lost order
   create: async (lostData, connection = null) => {
     const executor = connection ?? pool; // use passed connection or fallback to pool
-  
+
     try {
       const {
         ProposalId,
@@ -13,7 +13,7 @@ const LostOrderModel = {
         DetailedFeedback,
         CompetitorWon
       } = lostData;
-  
+
       const [result] = await executor.query(
         `INSERT INTO lostorder (
           ProposalId, Reason, DetailedFeedback, CompetitorWon,
@@ -26,7 +26,7 @@ const LostOrderModel = {
           CompetitorWon || 0
         ]
       );
-  
+
       return result.insertId;
     } catch (error) {
       logger.error('Error creating lost order:', error);
@@ -45,14 +45,17 @@ const LostOrderModel = {
           p.ProposalTitle,
           p.ProposalAmount,
           p.Currency,
-          o.OpportunityNumber,
-          l.CustomerName,
-          l.CompanyName,
-          l.AssignedToUserId
+          d.DealNumber,
+          d.DealName,
+          d.AssignedToUserId,
+          a.AccountName,
+          c.FirstName as ContactFirstName,
+          c.LastName as ContactLastName
          FROM lostorder lo
          LEFT JOIN proposal p ON lo.ProposalId = p.ProposalId
-         LEFT JOIN opportunity o ON p.OpportunityId = o.OpportunityId
-         LEFT JOIN leads l ON o.LeadId = l.LeadId
+         LEFT JOIN deals d ON p.DealId = d.DealId
+         LEFT JOIN accounts a ON d.AccountId = a.AccountId
+         LEFT JOIN contacts c ON d.ContactId = c.ContactId
          WHERE lo.LostOrderId = ? AND lo.IsDeleted = 0`,
         [lostOrderId]
       );
@@ -73,6 +76,7 @@ const LostOrderModel = {
         reason,
         competitorWon,
         assignedToUserId,
+        dealId,
         search
       } = filters;
 
@@ -88,18 +92,27 @@ const LostOrderModel = {
           p.ProposalTitle,
           p.ProposalAmount,
           p.Currency,
-          o.OpportunityNumber,
-          l.CustomerName,
-          l.CompanyName,
-          l.AssignedToUserId
+          d.DealNumber,
+          d.DealName,
+          d.AssignedToUserId,
+          a.AccountName,
+          c.FirstName as ContactFirstName,
+          c.LastName as ContactLastName
         FROM lostorder lo
         LEFT JOIN proposal p ON lo.ProposalId = p.ProposalId
-        LEFT JOIN opportunity o ON p.OpportunityId = o.OpportunityId
-        LEFT JOIN leads l ON o.LeadId = l.LeadId
+        LEFT JOIN deals d ON p.DealId = d.DealId
+        LEFT JOIN accounts a ON d.AccountId = a.AccountId
+        LEFT JOIN contacts c ON d.ContactId = c.ContactId
         WHERE lo.IsDeleted = 0
       `;
 
       const params = [];
+
+      if (dealId) {
+        const ids = Array.isArray(dealId) ? dealId : (typeof dealId === 'string' ? dealId.split(',').map(id => id.trim()) : [dealId]);
+        query += ` AND d.DealId IN (${ids.map(() => '?').join(', ')})`;
+        params.push(...ids);
+      }
 
       if (reason) {
         query += ' AND lo.Reason = ?';
@@ -112,14 +125,14 @@ const LostOrderModel = {
       }
 
       if (assignedToUserId) {
-        query += ' AND l.AssignedToUserId = ?';
+        query += ' AND d.AssignedToUserId = ?';
         params.push(assignedToUserId);
       }
 
       if (search) {
-        query += ' AND (p.ProposalTitle LIKE ? OR l.CustomerName LIKE ? OR l.CompanyName LIKE ?)';
+        query += ' AND (p.ProposalTitle LIKE ? OR d.DealName LIKE ? OR d.DealNumber LIKE ? OR a.AccountName LIKE ?)';
         const searchTerm = `%${search}%`;
-        params.push(searchTerm, searchTerm, searchTerm);
+        params.push(searchTerm, searchTerm, searchTerm, searchTerm);
       }
 
       // Get total count
@@ -216,6 +229,7 @@ const LostOrderModel = {
   getLossAnalysis: async (userId = null, roleId = null) => {
     try {
       const ROLES = require('../config/constants').ROLES;
+      const DEAL_STAGE = require('../config/constants').DEAL_STAGE;
 
       // Analysis by reason
       let reasonQuery = `
@@ -230,9 +244,8 @@ const LostOrderModel = {
       const params = [];
 
       if (roleId === ROLES.SALES_PERSON && userId) {
-        reasonQuery += ` LEFT JOIN opportunity o ON p.OpportunityId = o.OpportunityId
-                         LEFT JOIN leads l ON o.LeadId = l.LeadId
-                         WHERE l.AssignedToUserId = ? AND lo.IsDeleted = 0`;
+        reasonQuery += ` LEFT JOIN deals d ON p.DealId = d.DealId
+                        WHERE d.AssignedToUserId = ? AND lo.IsDeleted = 0`;
         params.push(userId);
       } else {
         reasonQuery += ' WHERE lo.IsDeleted = 0';
@@ -255,26 +268,48 @@ const LostOrderModel = {
       const competitorParams = [];
 
       if (roleId === ROLES.SALES_PERSON && userId) {
-        competitorQuery += ` LEFT JOIN opportunity o ON p.OpportunityId = o.OpportunityId
-                             LEFT JOIN leads l ON o.LeadId = l.LeadId
-                             WHERE l.AssignedToUserId = ? 
-                             AND lo.IsDeleted = 0 
-                             AND lo.CompetitorWon IS NOT NULL
-                             AND lo.CompetitorWon != ''`;
+        competitorQuery += ` LEFT JOIN deals d ON p.DealId = d.DealId
+                            WHERE d.AssignedToUserId = ? 
+                            AND lo.IsDeleted = 0 
+                            AND lo.CompetitorWon IS NOT NULL
+                            AND lo.CompetitorWon != ''`;
         competitorParams.push(userId);
       } else {
         competitorQuery += ` WHERE lo.IsDeleted = 0 
-                             AND lo.CompetitorWon IS NOT NULL
-                             AND lo.CompetitorWon != ''`;
+                            AND lo.CompetitorWon IS NOT NULL
+                            AND lo.CompetitorWon != ''`;
       }
 
       competitorQuery += ' GROUP BY lo.CompetitorWon ORDER BY Count DESC LIMIT 10';
 
       const [competitorRows] = await pool.query(competitorQuery, competitorParams);
 
+      // Fetch won/lost deal counts from deals table
+      let dealsCountQuery = `
+        SELECT
+          SUM(CASE WHEN DealStageId = ? THEN 1 ELSE 0 END) as wonDeals,
+          SUM(CASE WHEN DealStageId = ? THEN 1 ELSE 0 END) as lostDeals
+        FROM deals
+        WHERE IsDeleted = 0
+      `;
+
+      const dealsCountParams = [DEAL_STAGE.CLOSED_WON, DEAL_STAGE.CLOSED_LOST];
+
+      if (roleId === ROLES.SALES_PERSON && userId) {
+        dealsCountQuery += ' AND AssignedToUserId = ?';
+        dealsCountParams.push(userId);
+      }
+
+      const [dealsCountRows] = await pool.query(dealsCountQuery, dealsCountParams);
+
+      const wonDeals = parseInt(dealsCountRows[0]?.wonDeals || 0);
+      const lostDeals = parseInt(dealsCountRows[0]?.lostDeals || 0);
+
       return {
         byReason: reasonRows,
-        byCompetitor: competitorRows
+        byCompetitor: competitorRows,
+        wonDeals,
+        lostDeals
       };
     } catch (error) {
       logger.error('Error getting loss analysis:', error);

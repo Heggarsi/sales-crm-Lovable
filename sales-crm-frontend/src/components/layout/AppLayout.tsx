@@ -3,11 +3,10 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { cn } from "@/lib/utils";
+import { clearAuthStorage, getAuthUser, getRoleName } from "@/lib/auth";
 
 interface AppLayoutProps {
   children: ReactNode;
-  userRole: "admin" | "sales" | "customer";
-  userName: string;
 }
 
 const pathToBreadcrumb: Record<string, string[]> = {
@@ -29,31 +28,56 @@ const pathToBreadcrumb: Record<string, string[]> = {
   "/audit-log": ["Dashboard", "Audit Log"],
   "/profile": ["Profile"],
   "/create-lead": ["Dashboard", "Create Lead"],
+  "/settings": ["Dashboard", "Settings"],
 };
 
-export function AppLayout({ children, userRole, userName }: AppLayoutProps) {
+export function AppLayout({ children }: AppLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const authUser = getAuthUser();
+  const userName = authUser?.Name || "User";
+  const userRole = getRoleName(authUser?.RoleId);
 
+  const settingsRoutes = [
+    "/settings",
+    "/activity-log",
+    "/audit-log",
+    "/user-roles",
+    "/lead-sources",
+    "/source-types",
+    "/lead-types",
+    "/lead-statuses",
+    "/deal-stages",
+    "/activity-types",
+    "/appointment-statuses",
+    "/proposal-statuses",
+    "/payment-statuses",
+    "/delivery-statuses",
+  ];
+
+  const isSettingsPage = settingsRoutes.includes(location.pathname);
   const breadcrumbs = pathToBreadcrumb[location.pathname] || ["Dashboard"];
 
   const handleLogout = () => {
+    clearAuthStorage();
     navigate("/login");
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <Sidebar
-        role={userRole}
-        onLogout={handleLogout}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
+    <div className="h-screen overflow-hidden bg-background flex">
+      {!isSettingsPage && (
+        <Sidebar
+          role={authUser?.RoleId}
+          onLogout={handleLogout}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
+      )}
       <div
         className={cn(
-          "transition-all duration-300",
-          sidebarCollapsed ? "ml-16" : "ml-64"
+          "flex-1 min-w-0 overflow-hidden flex flex-col transition-all duration-300",
+          !isSettingsPage ? (sidebarCollapsed ? "ml-16" : "ml-16 lg:ml-64") : "ml-0"
         )}
       >
         <Header
@@ -61,8 +85,11 @@ export function AppLayout({ children, userRole, userName }: AppLayoutProps) {
           userName={userName}
           userRole={userRole}
           onLogout={handleLogout}
+          showBackButton={isSettingsPage}
         />
-        <main className="p-6">{children}</main>
+        <main className={cn("flex-1 min-w-0 overflow-y-auto scrollbar-hide p-4 md:p-6", isSettingsPage && "max-w-7xl mx-auto w-full")}>
+          {children}
+        </main>
       </div>
     </div>
   );

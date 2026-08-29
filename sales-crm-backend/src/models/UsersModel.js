@@ -52,10 +52,10 @@ const UserModel = {
   create: async (userData) => {
     try {
       const { Name, Email, Password, RoleId, CreatedBy } = userData;
-      
+
       // Hash password
       const hashedPassword = await bcrypt.hash(Password, 10);
-      
+
       const [result] = await pool.query(
         `INSERT INTO users (Name, Email, Password, RoleId, IsActive, IsDeleted, CreatedBy, CreatedAt, UpdatedAt)
          VALUES (?, ?, ?, ?, 1, 0, ?, NOW(), NOW())`,
@@ -88,7 +88,7 @@ const UserModel = {
         LEFT JOIN userrole r ON u.RoleId = r.RoleId
         WHERE u.IsDeleted = 0
       `;
-      
+
       const params = [];
 
       if (roleId) {
@@ -133,7 +133,7 @@ const UserModel = {
   update: async (userId, updateData) => {
     try {
       const { Name, Email, RoleId, IsActive, UpdatedBy } = updateData;
-      
+
       const fields = [];
       const params = [];
 
@@ -177,7 +177,7 @@ const UserModel = {
   updatePassword: async (userId, newPassword) => {
     try {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      
+
       const [result] = await pool.query(
         'UPDATE users SET Password = ?, UpdatedAt = NOW() WHERE UserId = ?',
         [hashedPassword, userId]
@@ -223,6 +223,23 @@ const UserModel = {
       return rows;
     } catch (error) {
       logger.error('Error getting users by role:', error);
+      throw error;
+    }
+  },
+
+  // Check if user has Sales Person role
+  isSalesPerson: async (userId) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT r.RoleName 
+         FROM users u
+         JOIN userrole r ON u.RoleId = r.RoleId
+         WHERE u.UserId = ? AND u.IsDeleted = 0`,
+        [userId]
+      );
+      return rows.length > 0 && rows[0].RoleName === 'Sales Person';
+    } catch (error) {
+      logger.error('Error checking if user is sales person:', error);
       throw error;
     }
   }

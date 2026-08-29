@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { BACKEND_BASE_URL } from "@/config";
+import { toAuthUser } from "@/lib/auth";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -34,24 +35,31 @@ export default function Login() {
         throw new Error(data.message || "Login failed");
       }
 
-      // ✅ FIX — match backend response exactly
       const token = data?.data?.accessToken;
+      const user = data?.data?.user;
 
       if (!token) {
         throw new Error("Access token not received from server");
       }
 
+      if (!user) {
+        throw new Error("User details not received from server");
+      }
+
       localStorage.setItem("token", token);
+      localStorage.setItem("authUser", JSON.stringify(toAuthUser(user)));
 
       toast({
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
       navigate("/dashboard");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Invalid email or password.";
+
       toast({
         title: "Login failed",
-        description: error.message || "Invalid email or password.",
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -67,7 +75,7 @@ export default function Login() {
           <div className="absolute top-20 left-20 w-72 h-72 bg-primary rounded-full blur-3xl" />
           <div className="absolute bottom-20 right-20 w-96 h-96 bg-accent rounded-full blur-3xl" />
         </div>
-        
+
         <div className="relative z-10">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center shadow-glow">
@@ -176,7 +184,7 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* <div className="flex items-center gap-2">
               <Checkbox
                 id="remember"
                 checked={rememberMe}
@@ -185,7 +193,7 @@ export default function Login() {
               <Label htmlFor="remember" className="text-sm font-normal">
                 Remember me for 30 days
               </Label>
-            </div>
+            </div> */}
 
             <Button
               type="submit"
@@ -195,13 +203,6 @@ export default function Login() {
               {isLoading ? "Signing in..." : "Sign in"}
             </Button>
           </form>
-
-          <p className="text-center text-sm text-muted-foreground">
-            Don't have an account?{" "}
-            <Link to="/register" className="text-primary font-medium hover:underline">
-              Create account
-            </Link>
-          </p>
         </div>
       </div>
     </div>

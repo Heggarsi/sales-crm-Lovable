@@ -1,6 +1,9 @@
 const AppointmentModel = require('../models/AppointmentModel');
 const AppointmentStatusModel = require('../models/AppointmentStatusModel');
 const LeadModel = require('../models/LeadsModel');
+const ContactModel = require('../models/ContactModel');
+const AccountModel = require('../models/AccountModel');
+const DealModel = require('../models/DealModel');
 const ActivityLogModel = require('../models/ActivityLogModel');
 const emailService = require('../utils/emailService');
 const { AppError } = require('../middlewares/errorHandler.middleware');
@@ -9,85 +12,199 @@ const logger = require('../utils/logger');
 const helpers = require('../utils/helpers');
 const { pool } = require('../config/database');
 
+// ─── Relation Resolution ───────────────────────────────────────────────────────
+//
+// Rules:
+//   DealId supplied    → fetch deal → extract AccountId + ContactId from deal
+//                                   → extract LeadId from that contact (if contact exists)
+//   ContactId supplied → fetch contact → extract LeadId from contact
+//   LeadId only        → nothing extra to extract
+//   AccountId only     → nothing extra to extract
+//
+// After extraction all IDs are validated to actually exist.
+
+const resolveAndEnrichRelations = async ({ LeadId, ContactId, AccountId, DealId }) => {
+  let deal = null;
+  let contact = null;
+  let account = null;
+  let lead = null;
+
+  // ── Step 1: resolve Deal and cascade its FK fields ───────────────────────
+  if (DealId) {
+    deal = await DealModel.findById(DealId);
+    if (!deal) throw new AppError('Deal not found', HTTP_STATUS.NOT_FOUND);
+
+    // Cascade: prefer caller-supplied values, fall back to deal's own FKs
+    if (!AccountId && deal.AccountId) AccountId = deal.AccountId;
+    if (!ContactId && deal.ContactId) ContactId = deal.ContactId;
+  }
+
+  // ── Step 2: resolve Contact and cascade LeadId ────────────────────────────
+  if (ContactId) {
+    contact = await ContactModel.findById(ContactId);
+    if (!contact) throw new AppError('Contact not found', HTTP_STATUS.NOT_FOUND);
+
+    // Cascade: if contact carries a LeadId, inherit it
+    if (!LeadId && contact.LeadId) LeadId = contact.LeadId;
+  }
+
+  // ── Step 3: resolve Account ───────────────────────────────────────────────
+  if (AccountId) {
+    account = await AccountModel.findById(AccountId);
+    if (!account) throw new AppError('Account not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  // ── Step 4: resolve Lead ──────────────────────────────────────────────────
+  if (LeadId) {
+    lead = await LeadModel.findById(LeadId);
+    if (!lead) throw new AppError('Lead not found', HTTP_STATUS.NOT_FOUND);
+  }
+
+  return {
+    // Resolved records
+    lead, contact, account, deal,
+    // Enriched IDs (may differ from what caller originally passed in)
+    LeadId: LeadId || null,
+    ContactId: ContactId || null,
+    AccountId: AccountId || null,
+    DealId: DealId || null
+  };
+};
+
+// ─── Ownership check (SALES_PERSON gate) ──────────────────────────────────────
+const assertOwnership = (appointment, user) => {
+  if (user.RoleId !== ROLES.SALES_PERSON) return;
+
+  const assignedTo = appointment.AssignedToUserId ?? null;
+
+  if (assignedTo !== user.UserId) {
+    throw new AppError(
+      'You can only manage appointments linked to leads assigned to you',
+      HTTP_STATUS.FORBIDDEN
+    );
+  }
+};
+
+// ─── Activity-log description helper ──────────────────────────────────────────
+const buildRelationSummary = ({ lead, contact, account, deal }) => {
+  const parts = [];
+  if (lead) parts.push(`Lead: ${[lead.FirstName, lead.LastName].filter(Boolean).join(' ')}`);
+  if (contact) parts.push(`Contact: ${[contact.FirstName, contact.LastName].filter(Boolean).join(' ')}`);
+  if (account) parts.push(`Account: ${account.AccountName}`);
+  if (deal) parts.push(`Deal: ${deal.DealName}`);
+  return parts.join(' | ');
+};
+
+// ─── Service ───────────────────────────────────────────────────────────────────
 const AppointmentService = {
-  // Create appointment
+
+  // ── Create Appointment ────────────────────────────────────────────────────
   createAppointment: async (appointmentData, user) => {
     try {
-      const { LeadId, MeetingDate } = appointmentData;
+      let {
+        LeadId, ContactId, AccountId, DealId,
+        StartDateTime, EndDateTime,
+        Title, Mode, Location, MeetingLink,
+        Agenda, Duration
+      } = appointmentData;
 
-      // Check if lead exists
-      const lead = await LeadModel.findById(LeadId);
-      if (!lead) {
-        throw new AppError('Lead not found', HTTP_STATUS.NOT_FOUND);
+      // At least one relation required
+      if (!LeadId && !ContactId && !AccountId && !DealId) {
+        throw new AppError(
+          'At least one relation (LeadId, ContactId, AccountId, or DealId) is required',
+          HTTP_STATUS.BAD_REQUEST
+        );
       }
 
-      // In-memory ownership check
-      if (user.RoleId === ROLES.SALES_PERSON) {
-        if (lead.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only create appointments for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+      // Resolve all relations + cascade IDs from deal/contact
+      const relations = await resolveAndEnrichRelations({ LeadId, ContactId, AccountId, DealId });
+
+      // Use enriched IDs for the rest of this method
+      LeadId = relations.LeadId;
+      ContactId = relations.ContactId;
+      AccountId = relations.AccountId;
+      DealId = relations.DealId;
+
+      // Ownership: driven by linked lead when present
+      if (user.RoleId === ROLES.SALES_PERSON && relations.lead) {
+        if (relations.lead.AssignedToUserId !== user.UserId) {
+          throw new AppError(
+            'You can only create appointments for leads assigned to you',
+            HTTP_STATUS.FORBIDDEN
+          );
         }
       }
 
-      // Validate meeting date is in future
-      const meetingDateTime = new Date(MeetingDate);
-      if (meetingDateTime < new Date()) {
-        throw new AppError('Meeting date must be in the future', HTTP_STATUS.BAD_REQUEST);
+      // StartDateTime must be in the future
+      const startDT = new Date(StartDateTime);
+      if (startDT < new Date()) {
+        throw new AppError('StartDateTime must be in the future', HTTP_STATUS.BAD_REQUEST);
       }
 
-      // **Check if lead already has an appointment on the same day**
-      const startOfDay = new Date(meetingDateTime);
-      startOfDay.setHours(0, 0, 0, 0);
+      // EndDateTime must be after StartDateTime
+      if (EndDateTime && new Date(EndDateTime) <= startDT) {
+        throw new AppError('EndDateTime must be after StartDateTime', HTTP_STATUS.BAD_REQUEST);
+      }
 
-      const endOfDay = new Date(meetingDateTime);
-      endOfDay.setHours(23, 59, 59, 999);
+      // Duplicate check: same lead + same calendar day
+      if (LeadId) {
+        const startOfDay = new Date(startDT);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(startDT);
+        endOfDay.setHours(23, 59, 59, 999);
 
-      // Check if any appointment exists for a lead on the same day
-      const existingAppointment = await AppointmentModel.findOne({
-        LeadId,
-        startOfDay,   // new params
-        endOfDay
-      });
+        const existing = await AppointmentModel.findOne({ LeadId, startOfDay, endOfDay });
+        if (existing) {
+          throw new AppError(
+            `This lead already has an appointment on ${startDT.toDateString()}`,
+            HTTP_STATUS.BAD_REQUEST
+          );
+        }
+      }
 
-      if (existingAppointment) {
-        throw new AppError(
-          `Lead already has an appointment on ${meetingDateTime.toDateString()}`,
-          HTTP_STATUS.BAD_REQUEST
-        );
-      }      
-
-      // Create appointment
+      // Persist with enriched IDs
       const appointmentId = await AppointmentModel.create({
         ...appointmentData,
+        LeadId,
+        ContactId,
+        AccountId,
+        DealId,
         CreatedByUserId: user.UserId,
-        AppointmentStatusId: 1 // Scheduled
+        AppointmentStatusId: 1  // Scheduled
       });
 
       const newAppointment = await AppointmentModel.findById(appointmentId);
 
-      // Log activity
+      // Activity log — attach to the appointment
       await ActivityLogModel.create({
-        LeadId,
-        ActivityTypeId: 3, // Meeting
-        Subject: `Appointment Scheduled: ${appointmentData.Title}`,
-        Description: `Appointment scheduled for ${MeetingDate}`,
+        AppointmentId: appointmentId,
+        ActivityTypeId: 3,  // Meeting
+        Subject: `Appointment Scheduled: ${Title}`,
+        Description: `Appointment scheduled for ${StartDateTime}. ${buildRelationSummary(relations)}`,
         Direction: 'Outbound',
         ActivityDate: helpers.formatDateTimeForMySQL(),
         CreatedByUserId: user.UserId
       });
 
-      // Send email notification to client
-      if (lead.Email) {
-        await emailService.sendAppointmentEmail(lead.Email, {
-          title: appointmentData.Title,
-          date: MeetingDate,
-          duration: appointmentData.Duration,
-          mode: appointmentData.Mode,
-          location: appointmentData.Location
+      // Email — prefer lead email, fall back to contact
+      const recipientEmail =
+        relations.lead?.Email ??
+        relations.contact?.Email ??
+        null;
+
+      if (recipientEmail) {
+        await emailService.sendAppointmentEmail(recipientEmail, {
+          title: Title,
+          date: StartDateTime,
+          endDate: EndDateTime,
+          duration: Duration,
+          mode: Mode,
+          location: Location,
+          meetingLink: MeetingLink
         });
       }
 
       logger.info('Appointment created successfully', { appointmentId, createdBy: user.UserId });
-
       return newAppointment;
     } catch (error) {
       logger.error('Create appointment error:', error);
@@ -95,10 +212,9 @@ const AppointmentService = {
     }
   },
 
-  // Get all appointments
+  // ── Get All Appointments ──────────────────────────────────────────────────
   getAllAppointments: async (filters, user) => {
     try {
-      // Sales Person can only see appointments for their assigned leads
       if (user.RoleId === ROLES.SALES_PERSON) {
         filters.assignedToUserId = user.UserId;
       }
@@ -117,22 +233,13 @@ const AppointmentService = {
     }
   },
 
-  // Get appointment by ID
+  // ── Get Appointment by ID ─────────────────────────────────────────────────
   getAppointmentById: async (appointmentId, user) => {
     try {
       const appointment = await AppointmentModel.findById(appointmentId);
+      if (!appointment) throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
 
-      if (!appointment) {
-        throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
-      }
-
-      // In-memory ownership check
-      if (user.RoleId === ROLES.SALES_PERSON) {
-        if (appointment.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only access appointments for leads assigned to you', HTTP_STATUS.FORBIDDEN);
-        }
-      }
-
+      assertOwnership(appointment, user);
       return appointment;
     } catch (error) {
       logger.error('Get appointment by ID error:', error);
@@ -140,68 +247,65 @@ const AppointmentService = {
     }
   },
 
-  // Update appointment
+  // ── Update Appointment ────────────────────────────────────────────────────
   updateAppointment: async (appointmentId, updateData, user) => {
     try {
       const appointment = await AppointmentModel.findById(appointmentId);
+      if (!appointment) throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
 
-      if (!appointment) {
-        throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
+      assertOwnership(appointment, user);
+
+      if ([2, 3].includes(appointment.AppointmentStatusId)) {
+        throw new AppError(
+          'Cannot update a completed or cancelled appointment',
+          HTTP_STATUS.BAD_REQUEST
+        );
       }
 
-      // In-memory ownership check
-      if (user.RoleId === ROLES.SALES_PERSON) {
-        if (appointment.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only update appointments for leads assigned to you', HTTP_STATUS.FORBIDDEN);
-        }
-      }
+      // Re-validate StartDateTime / EndDateTime ordering
+      const newStart = updateData.StartDateTime
+        ? new Date(updateData.StartDateTime)
+        : new Date(appointment.StartDateTime);
 
-      // Don't allow updating completed or cancelled appointments
-      if (appointment.AppointmentStatusId === 2 || appointment.AppointmentStatusId === 3) {
-        throw new AppError('Cannot update completed or cancelled appointments', HTTP_STATUS.BAD_REQUEST);
+      const newEnd = updateData.EndDateTime
+        ? new Date(updateData.EndDateTime)
+        : (appointment.EndDateTime ? new Date(appointment.EndDateTime) : null);
+
+      if (newEnd && newEnd <= newStart) {
+        throw new AppError('EndDateTime must be after StartDateTime', HTTP_STATUS.BAD_REQUEST);
       }
 
       await AppointmentModel.update(appointmentId, updateData);
 
-      const updatedAppointment = await AppointmentModel.findById(appointmentId);
-
+      const updated = await AppointmentModel.findById(appointmentId);
       logger.info('Appointment updated successfully', { appointmentId, updatedBy: user.UserId });
-
-      return updatedAppointment;
+      return updated;
     } catch (error) {
       logger.error('Update appointment error:', error);
       throw error;
     }
   },
 
-  // Cancel appointment
+  // ── Cancel Appointment ────────────────────────────────────────────────────
   cancelAppointment: async (appointmentId, reason, user) => {
     try {
       const appointment = await AppointmentModel.findById(appointmentId);
+      if (!appointment) throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
 
-      if (!appointment) {
-        throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
+      assertOwnership(appointment, user);
+
+      if ([2, 3].includes(appointment.AppointmentStatusId)) {
+        throw new AppError(
+          'Appointment is already completed or cancelled',
+          HTTP_STATUS.BAD_REQUEST
+        );
       }
 
-      // In-memory ownership check
-      if (user.RoleId === ROLES.SALES_PERSON) {
-        if (appointment.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only cancel appointments for leads assigned to you', HTTP_STATUS.FORBIDDEN);
-        }
-      }
+      await AppointmentModel.updateStatus(appointmentId, 3);  // 3 = Cancelled
 
-      // Can't cancel already completed or cancelled appointments
-      if (appointment.AppointmentStatusId === 2 || appointment.AppointmentStatusId === 3) {
-        throw new AppError('Appointment is already completed or cancelled', HTTP_STATUS.BAD_REQUEST);
-      }
-
-      // Update status to Cancelled (3)
-      await AppointmentModel.updateStatus(appointmentId, 3);
-
-      // Log activity
       await ActivityLogModel.create({
-        LeadId: appointment.LeadId,
-        ActivityTypeId: 4, // Note
+        AppointmentId: appointmentId,
+        ActivityTypeId: 4,  // Note
         Subject: `Appointment Cancelled: ${appointment.Title}`,
         Description: reason || 'Appointment cancelled',
         Direction: 'Internal',
@@ -209,72 +313,76 @@ const AppointmentService = {
         CreatedByUserId: user.UserId
       });
 
-      const updatedAppointment = await AppointmentModel.findById(appointmentId);
-
+      const updated = await AppointmentModel.findById(appointmentId);
       logger.info('Appointment cancelled', { appointmentId, cancelledBy: user.UserId });
-
-      return updatedAppointment;
+      return updated;
     } catch (error) {
       logger.error('Cancel appointment error:', error);
       throw error;
     }
   },
 
-  // Complete appointment
+  // ── Complete Appointment ──────────────────────────────────────────────────
   completeAppointment: async (appointmentId, completionData, user) => {
     const connection = await pool.getConnection();
-
     try {
       await connection.beginTransaction();
 
       const appointment = await AppointmentModel.findById(appointmentId);
+      if (!appointment) throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
 
-      if (!appointment) {
-        throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
+      assertOwnership(appointment, user);
+
+      if (![1, 4].includes(appointment.AppointmentStatusId)) {
+        throw new AppError(
+          'Only scheduled or rescheduled appointments can be completed',
+          HTTP_STATUS.BAD_REQUEST
+        );
       }
 
-      // In-memory ownership check
-      if (user.RoleId === ROLES.SALES_PERSON) {
-        if (appointment.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only complete appointments for leads assigned to you', HTTP_STATUS.FORBIDDEN);
-        }
-      }
+      const { MeetingNotes, Outcome, NextFollowUpDate, FollowUpNotes } = completionData;
 
-      // Can only complete scheduled appointments
-      if (appointment.AppointmentStatusId !== 1) {
-        throw new AppError('Only scheduled appointments can be completed', HTTP_STATUS.BAD_REQUEST);
-      }
-
-      // Update status to Completed (2)
       await connection.query(
-        'UPDATE appointment SET AppointmentStatusId = 2, UpdatedAt = NOW() WHERE AppointmentId = ?',
-        [appointmentId]
+        `UPDATE appointment
+         SET AppointmentStatusId = 2,
+             MeetingNotes        = COALESCE(?, MeetingNotes),
+             Outcome             = COALESCE(?, Outcome),
+             NextFollowUpDate    = COALESCE(?, NextFollowUpDate),
+             FollowUpNotes       = COALESCE(?, FollowUpNotes),
+             UpdatedAt           = NOW()
+         WHERE AppointmentId = ?`,
+        [
+          MeetingNotes || null,
+          Outcome || null,
+          NextFollowUpDate || null,
+          FollowUpNotes || null,
+          appointmentId
+        ]
       );
 
-      // Log activity
       await connection.query(
         `INSERT INTO activitylog (
-          LeadId, ActivityTypeId, Subject, Description, Direction, Duration,
-          Outcome, ActivityDate, CreatedByUserId, IsDeleted, CreatedAt, UpdatedAt
+          AppointmentId, ActivityTypeId, Subject, Description,
+          Direction, Duration, Outcome,
+          ActivityDate, CreatedByUserId, IsDeleted, CreatedAt, UpdatedAt
         ) VALUES (?, 3, ?, ?, 'Completed', ?, ?, NOW(), ?, 0, NOW(), NOW())`,
         [
-          appointment.LeadId,
+          appointmentId,
           `Meeting Completed: ${appointment.Title}`,
-          completionData.notes || 'Meeting completed successfully',
+          MeetingNotes || 'Meeting completed successfully',
           appointment.Duration,
-          completionData.outcome || 'Successful',
+          Outcome || 'Successful',
           user.UserId
         ]
       );
 
       await connection.commit();
 
-      const updatedAppointment = await AppointmentModel.findById(appointmentId);
-
+      const updated = await AppointmentModel.findById(appointmentId);
       logger.info('Appointment completed', { appointmentId, completedBy: user.UserId });
 
       return {
-        appointment: updatedAppointment,
+        appointment: updated,
         message: 'Appointment completed successfully. You can now create Minutes of Meeting.'
       };
     } catch (error) {
@@ -286,87 +394,115 @@ const AppointmentService = {
     }
   },
 
-  // Reschedule appointment
-  rescheduleAppointment: async (appointmentId, newDate, reason, user) => {
+  // ── Reschedule Appointment ────────────────────────────────────────────────
+  rescheduleAppointment: async (appointmentId, { StartDateTime, EndDateTime, reason }, user) => {
     try {
       const appointment = await AppointmentModel.findById(appointmentId);
+      if (!appointment) throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
 
-      if (!appointment) {
-        throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
+      assertOwnership(appointment, user);
+
+      if (![1, 4].includes(appointment.AppointmentStatusId)) {
+        throw new AppError(
+          'Only scheduled or rescheduled appointments can be rescheduled',
+          HTTP_STATUS.BAD_REQUEST
+        );
       }
 
-      // In-memory ownership check
-      if (user.RoleId === ROLES.SALES_PERSON) {
-        if (appointment.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only reschedule appointments for leads assigned to you', HTTP_STATUS.FORBIDDEN);
-        }
+      const newStart = new Date(StartDateTime);
+      if (newStart < new Date()) {
+        throw new AppError('New StartDateTime must be in the future', HTTP_STATUS.BAD_REQUEST);
       }
 
-      // Can only reschedule scheduled appointments
-      if (appointment.AppointmentStatusId !== 1) {
-        throw new AppError('Only scheduled appointments can be rescheduled', HTTP_STATUS.BAD_REQUEST);
+      if (EndDateTime && new Date(EndDateTime) <= newStart) {
+        throw new AppError('EndDateTime must be after StartDateTime', HTTP_STATUS.BAD_REQUEST);
       }
 
-      // Validate new date is in future
-      const newDateTime = new Date(newDate);
-      if (newDateTime < new Date()) {
-        throw new AppError('New meeting date must be in the future', HTTP_STATUS.BAD_REQUEST);
-      }
-
-      // Update appointment
       await AppointmentModel.update(appointmentId, {
-        MeetingDate: newDate,
-        AppointmentStatusId: 4 // Rescheduled
+        StartDateTime,
+        EndDateTime: EndDateTime || null,
+        AppointmentStatusId: 4  // Rescheduled
       });
 
-      // Log activity
       await ActivityLogModel.create({
-        LeadId: appointment.LeadId,
-        ActivityTypeId: 4, // Note
+        AppointmentId: appointmentId,
+        ActivityTypeId: 4,
         Subject: `Appointment Rescheduled: ${appointment.Title}`,
-        Description: `Rescheduled from ${appointment.MeetingDate} to ${newDate}. Reason: ${reason || 'Not specified'}`,
+        Description: `Rescheduled from ${appointment.StartDateTime} to ${StartDateTime}. Reason: ${reason || 'Not specified'}`,
         Direction: 'Internal',
         ActivityDate: helpers.formatDateTimeForMySQL(),
         CreatedByUserId: user.UserId
       });
 
-      const updatedAppointment = await AppointmentModel.findById(appointmentId);
-
+      const updated = await AppointmentModel.findById(appointmentId);
       logger.info('Appointment rescheduled', { appointmentId, rescheduledBy: user.UserId });
-
-      return updatedAppointment;
+      return updated;
     } catch (error) {
       logger.error('Reschedule appointment error:', error);
       throw error;
     }
   },
 
-  // Get appointments by lead
+  // ── Get by Lead ───────────────────────────────────────────────────────────
   getAppointmentsByLead: async (leadId, user) => {
     try {
       const lead = await LeadModel.findById(leadId);
+      if (!lead) throw new AppError('Lead not found', HTTP_STATUS.NOT_FOUND);
 
-      if (!lead) {
-        throw new AppError('Lead not found', HTTP_STATUS.NOT_FOUND);
+      if (user.RoleId === ROLES.SALES_PERSON && lead.AssignedToUserId !== user.UserId) {
+        throw new AppError(
+          'You can only access appointments for leads assigned to you',
+          HTTP_STATUS.FORBIDDEN
+        );
       }
 
-      // In-memory ownership check
-      if (user.RoleId === ROLES.SALES_PERSON) {
-        if (lead.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only access appointments for leads assigned to you', HTTP_STATUS.FORBIDDEN);
-        }
-      }
-
-      const appointments = await AppointmentModel.getByLeadId(leadId);
-
-      return appointments;
+      return await AppointmentModel.getByLeadId(leadId);
     } catch (error) {
       logger.error('Get appointments by lead error:', error);
       throw error;
     }
   },
 
-  // Get appointment statuses
+  // ── Get by Contact ────────────────────────────────────────────────────────
+  getAppointmentsByContact: async (contactId, user) => {
+    try {
+      const contact = await ContactModel.findById(contactId);
+      if (!contact) throw new AppError('Contact not found', HTTP_STATUS.NOT_FOUND);
+
+      return await AppointmentModel.getByContactId(contactId);
+    } catch (error) {
+      logger.error('Get appointments by contact error:', error);
+      throw error;
+    }
+  },
+
+  // ── Get by Account ────────────────────────────────────────────────────────
+  getAppointmentsByAccount: async (accountId, user) => {
+    try {
+      const account = await AccountModel.findById(accountId);
+      if (!account) throw new AppError('Account not found', HTTP_STATUS.NOT_FOUND);
+
+      return await AppointmentModel.getByAccountId(accountId);
+    } catch (error) {
+      logger.error('Get appointments by account error:', error);
+      throw error;
+    }
+  },
+
+  // ── Get by Deal ───────────────────────────────────────────────────────────
+  getAppointmentsByDeal: async (dealId, user) => {
+    try {
+      const deal = await DealModel.findById(dealId);
+      if (!deal) throw new AppError('Deal not found', HTTP_STATUS.NOT_FOUND);
+
+      return await AppointmentModel.getByDealId(dealId);
+    } catch (error) {
+      logger.error('Get appointments by deal error:', error);
+      throw error;
+    }
+  },
+
+  // ── Get Statuses ──────────────────────────────────────────────────────────
   getAppointmentStatuses: async () => {
     try {
       return await AppointmentStatusModel.getAll();

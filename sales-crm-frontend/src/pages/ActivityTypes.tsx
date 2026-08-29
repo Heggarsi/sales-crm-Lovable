@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Activity, Plus, Search, MoreHorizontal, Edit, Trash2 } from "lucide-react";
-import { AppLayout } from "@/components/layout/AppLayout";
+import { useState, useEffect, useCallback } from "react";
+import { Activity, Plus, Search, MoreHorizontal, Edit, Trash2, Loader2 } from "lucide-react";
+import { SettingsLayout } from "@/components/layout/SettingsLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,61 +22,127 @@ import {
 import { CrudDialog } from "@/components/shared/CrudDialog";
 import { DeleteConfirmDialog } from "@/components/shared/DeleteConfirmDialog";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import { BACKEND_BASE_URL } from "@/config";
 
 interface ActivityType {
-  id: number;
-  typeName: string;
+  ActivityTypeId: number;
+  TypeName: string;
+  Description?: string;
 }
 
-const dummyData: ActivityType[] = [
-  { id: 1, typeName: "Phone Call" },
-  { id: 2, typeName: "Email" },
-  { id: 3, typeName: "Meeting" },
-  { id: 4, typeName: "WhatsApp" },
-  { id: 5, typeName: "Video Call" },
-  { id: 6, typeName: "Site Visit" },
-  { id: 7, typeName: "Note" },
-];
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
 
 export default function ActivityTypes() {
-  const [data, setData] = useState<ActivityType[]>(dummyData);
+  const [data, setData] = useState<ActivityType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ActivityType | null>(null);
+  const [formData, setFormData] = useState({ typeName: "", description: "" });
   const [searchQuery, setSearchQuery] = useState("");
+  const { toast } = useToast();
+
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_BASE_URL}/api/lookups/activity-types`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error("Failed to fetch activity types");
+      const result = await res.json();
+      setData(Array.isArray(result.data) ? result.data : []);
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const filteredData = data.filter(item =>
-    item.typeName.toLowerCase().includes(searchQuery.toLowerCase())
+    item.TypeName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleEdit = (item: ActivityType) => {
+  const handleCreate = async () => {
+    if (!formData.typeName) {
+      toast({ title: "Validation Error", description: "Type name is required", variant: "destructive" });
+      return;
+    }
+    try {
+      const res = await fetch(`${BACKEND_BASE_URL}/api/lookups/activity-types`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(formData),
+      });
+      if (!res.ok) throw new Error("Failed to create activity type");
+      toast({ title: "Success", description: "Activity type created successfully" });
+      fetchData();
+      setIsCreateOpen(false);
+      setFormData({ typeName: "", description: "" });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!selectedItem || !formData.typeName) return;
+    try {
+      const res = await fetch(`${BACKEND_BASE_URL}/api/lookups/activity-types/${selectedItem.ActivityTypeId}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(formData),
+      });
+      if (!res.ok) throw new Error("Failed to update activity type");
+      toast({ title: "Success", description: "Activity type updated successfully" });
+      fetchData();
+      setIsEditOpen(false);
+      setSelectedItem(null);
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedItem) return;
+    try {
+      const res = await fetch(`${BACKEND_BASE_URL}/api/lookups/activity-types/${selectedItem.ActivityTypeId}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error("Failed to delete activity type");
+      toast({ title: "Success", description: "Activity type deleted successfully" });
+      fetchData();
+      setIsDeleteOpen(false);
+      setSelectedItem(null);
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const openEdit = (item: ActivityType) => {
     setSelectedItem(item);
+    setFormData({ typeName: item.TypeName, description: item.Description || "" });
     setIsEditOpen(true);
   };
 
-  const handleDelete = (item: ActivityType) => {
+  const openDelete = (item: ActivityType) => {
     setSelectedItem(item);
     setIsDeleteOpen(true);
   };
 
-  const confirmDelete = () => {
-    if (selectedItem) {
-      setData(data.filter(item => item.id !== selectedItem.id));
-      setIsDeleteOpen(false);
-      setSelectedItem(null);
-    }
-  };
-
-  const FormFields = ({ item }: { item?: ActivityType }) => (
-    <div className="space-y-2">
-      <Label>Type Name</Label>
-      <Input defaultValue={item?.typeName} placeholder="Enter activity type name" />
-    </div>
-  );
-
   return (
-    <AppLayout userRole="admin" userName="Alex Thompson">
+    <SettingsLayout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -86,7 +152,7 @@ export default function ActivityTypes() {
             </h1>
             <p className="text-muted-foreground">Manage activity type options</p>
           </div>
-          <Button className="gradient-primary" onClick={() => setIsCreateOpen(true)}>
+          <Button className="gradient-primary" onClick={() => { setFormData({ typeName: "", description: "" }); setIsCreateOpen(true); }}>
             <Plus className="w-4 h-4 mr-2" />
             Add Type
           </Button>
@@ -105,43 +171,60 @@ export default function ActivityTypes() {
         </div>
 
         <div className="card-elevated rounded-xl overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Type Name</TableHead>
-                <TableHead className="w-12"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredData.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>
-                    <Badge variant="secondary">{item.typeName}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEdit(item)}>
-                          <Edit className="w-4 h-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(item)}>
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-20 space-y-4">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">Loading activity types...</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Type Name</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="w-12"></TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No activity types found.</TableCell>
+                  </TableRow>
+                ) : (
+                  filteredData.map((item) => (
+                    <TableRow key={item.ActivityTypeId}>
+                      <TableCell>
+                        <Badge variant="secondary">{item.TypeName}</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {item.Description || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEdit(item)}>
+                              <Edit className="w-4 h-4 mr-2" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive" onClick={() => openDelete(item)}>
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
         </div>
       </div>
 
@@ -150,9 +233,18 @@ export default function ActivityTypes() {
         onOpenChange={setIsCreateOpen}
         title="Add Activity Type"
         saveLabel="Create"
-        onSave={() => setIsCreateOpen(false)}
+        onSave={handleCreate}
       >
-        <FormFields />
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label>Type Name *</Label>
+            <Input value={formData.typeName} onChange={(e) => setFormData({ ...formData, typeName: e.target.value })} placeholder="Enter activity type name" />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Input value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="Enter description" />
+          </div>
+        </div>
       </CrudDialog>
 
       <CrudDialog
@@ -161,16 +253,27 @@ export default function ActivityTypes() {
         title="Edit Activity Type"
         saveLabel="Save Changes"
         mode="edit"
-        onSave={() => setIsEditOpen(false)}
+        onSave={handleUpdate}
       >
-        <FormFields item={selectedItem || undefined} />
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label>Type Name *</Label>
+            <Input value={formData.typeName} onChange={(e) => setFormData({ ...formData, typeName: e.target.value })} placeholder="Enter activity type name" />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Input value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="Enter description" />
+          </div>
+        </div>
       </CrudDialog>
 
       <DeleteConfirmDialog
         open={isDeleteOpen}
         onOpenChange={setIsDeleteOpen}
         onConfirm={confirmDelete}
+        title="Delete Activity Type"
+        description={`Are you sure you want to delete "${selectedItem?.TypeName}"? This action cannot be undone.`}
       />
-    </AppLayout>
+    </SettingsLayout>
   );
 }

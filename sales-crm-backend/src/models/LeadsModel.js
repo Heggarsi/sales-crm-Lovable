@@ -11,12 +11,16 @@ create: async (leadData) => {
     await connection.beginTransaction();
 
     const {
-      CustomerName,
+      FirstName,
+      LastName,
       Email,
       Phone,
       AlternatePhone,
+      Mobile,
       CompanyName,
       Industry,
+      AnnualRevenue,
+      Rating,
       Designation,
       Country,
       State,
@@ -27,20 +31,11 @@ create: async (leadData) => {
       AssignedToUserId,
       AssignedBy,
       LeadStatusId,
+      ServiceRequiredId,
+      EstimatedValue,
+      Remarks,
       CreatedBy
     } = leadData;
-
-    // 🔐 1. Duplicate check (business rule)
-    const [existing] = await connection.query(
-      `SELECT LeadId FROM leads 
-       WHERE Email = ? AND IsDeleted = 0`,
-      [Email]
-    );
-
-    if (existing.length > 0) {
-      throw new AppError('Lead already exists with this email'      
-      );
-    }
 
     // 2. Generate unique lead number
     const LeadNumber = helpers.generateUniqueNumber('LEAD');
@@ -48,17 +43,21 @@ create: async (leadData) => {
     // 3. Insert
     const [result] = await connection.query(
       `INSERT INTO leads (
-        LeadNumber, CustomerName, Email, Phone, AlternatePhone,
-        CompanyName, Industry, Designation, Country, State, City, Address,
+        LeadNumber, FirstName, LastName, Email, Phone, AlternatePhone, Mobile,
+        CompanyName, Industry, AnnualRevenue, Rating, Designation, Country, State, City, Address,
         SourceId, LeadTypeId, AssignedToUserId, AssignedBy, AssignedAt,
-        LeadStatusId, IsActive, IsDeleted, CreatedBy, CreatedAt, UpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, NOW(), NOW())`,
+        LeadStatusId, ServiceRequiredId, EstimatedValue, Remarks,
+        IsActive, IsDeleted, CreatedBy, CreatedAt, UpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, NOW(), NOW())`,
       [
-        LeadNumber, CustomerName, Email, Phone, AlternatePhone,
-        CompanyName, Industry, Designation, Country, State, City, Address,
+        LeadNumber, FirstName || null, LastName, Email, Phone, AlternatePhone, Mobile || null,
+        CompanyName, Industry, AnnualRevenue || null, Rating || null, Designation, Country, State, City, Address,
         SourceId, LeadTypeId, AssignedToUserId || null, AssignedBy || null,
         AssignedToUserId ? helpers.formatDateTimeForMySQL() : null,
         LeadStatusId || 1,
+        ServiceRequiredId || null,
+        EstimatedValue || null,
+        Remarks || null,
         CreatedBy
       ]
     );
@@ -76,6 +75,22 @@ create: async (leadData) => {
 },
 
 
+  // Find lead by email (active, not deleted)
+  findByEmail: async (email) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT LeadId, LeadNumber, FirstName, LastName, Email
+         FROM leads
+         WHERE Email = ? AND IsDeleted = 0`,
+        [email]
+      );
+      return rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding lead by email:', error);
+      throw error;
+    }
+  },
+
   // Get lead by ID with related data
   findById: async (leadId) => {
     try {
@@ -87,6 +102,7 @@ create: async (leadData) => {
           lt.TypeName as LeadTypeName,
           lt.Priority as LeadPriority,
           lst.StatusName as LeadStatusName,
+          lsr.ServiceName as ServiceRequiredName,
           u.Name as AssignedToName,
           u.Email as AssignedToEmail,
           u.RoleId as AssignedToRoleId,
@@ -96,6 +112,7 @@ create: async (leadData) => {
          LEFT JOIN leadsource ls ON l.SourceId = ls.SourceId
          LEFT JOIN leadtype lt ON l.LeadTypeId = lt.LeadTypeId
          LEFT JOIN leadstatus lst ON l.LeadStatusId = lst.LeadStatusId
+         LEFT JOIN lead_service_required lsr ON l.ServiceRequiredId = lsr.ServiceRequiredId
          LEFT JOIN users u ON l.AssignedToUserId = u.UserId
          LEFT JOIN users creator ON l.CreatedBy = creator.UserId
          LEFT JOIN users updater ON l.UpdatedBy = updater.UserId
@@ -119,7 +136,10 @@ create: async (leadData) => {
         leadStatusId,
         sourceId,
         leadTypeId,
+        serviceRequiredId,
         search,
+        sortBy,
+        sortOrder,
         createdBy
       } = filters;
 
@@ -129,22 +149,28 @@ create: async (leadData) => {
         SELECT 
           l.LeadId,
           l.LeadNumber,
-          l.CustomerName,
+          l.FirstName,
+          l.LastName,
           l.Email,
           l.Phone,
           l.CompanyName,
           l.Industry,
           l.AssignedToUserId,
           l.LeadStatusId,
+          l.ServiceRequiredId,
+          l.EstimatedValue,
+          l.IsConverted,
           l.CreatedAt,
           ls.SourceName,
           lt.TypeName as LeadTypeName,
           lst.StatusName as LeadStatusName,
+          lsr.ServiceName as ServiceRequiredName,
           u.Name as AssignedToName
         FROM leads l
         LEFT JOIN leadsource ls ON l.SourceId = ls.SourceId
         LEFT JOIN leadtype lt ON l.LeadTypeId = lt.LeadTypeId
         LEFT JOIN leadstatus lst ON l.LeadStatusId = lst.LeadStatusId
+        LEFT JOIN lead_service_required lsr ON l.ServiceRequiredId = lsr.ServiceRequiredId
         LEFT JOIN users u ON l.AssignedToUserId = u.UserId
         WHERE l.IsDeleted = 0
       `;
@@ -171,15 +197,20 @@ create: async (leadData) => {
         params.push(leadTypeId);
       }
 
+      if (serviceRequiredId) {
+        query += ' AND l.ServiceRequiredId = ?';
+        params.push(serviceRequiredId);
+      }
+
       if (createdBy) {
         query += ' AND l.CreatedBy = ?';
         params.push(createdBy);
       }
 
       if (search) {
-        query += ' AND (l.CustomerName LIKE ? OR l.Email LIKE ? OR l.Phone LIKE ? OR l.CompanyName LIKE ?)';
+        query += ' AND (l.FirstName LIKE ? OR l.LastName LIKE ? OR l.Email LIKE ? OR l.Phone LIKE ? OR l.CompanyName LIKE ?)';
         const searchTerm = `%${search}%`;
-        params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+        params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
       }
 
       // Get total count
@@ -191,7 +222,15 @@ create: async (leadData) => {
       const total = countResult[0].total;
 
       // Get paginated results
-      query += ' ORDER BY l.CreatedAt DESC LIMIT ? OFFSET ?';
+      const sortColumnMap = {
+        createdAt: 'l.CreatedAt',
+        estimatedValue: 'l.EstimatedValue',
+        name: "CONCAT(l.FirstName, ' ', l.LastName)",
+        company: 'l.CompanyName'
+      };
+      const sortColumn = sortColumnMap[sortBy] || 'l.CreatedAt';
+      const sortDirection = (String(sortOrder || 'desc').toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+      query += ` ORDER BY ${sortColumn} ${sortDirection} LIMIT ? OFFSET ?`;
       params.push(parseInt(limit), parseInt(offset));
 
       const [rows] = await pool.query(query, params);
@@ -215,11 +254,12 @@ create: async (leadData) => {
       const params = [];
 
       const allowedFields = [
-        'CustomerName', 'Email', 'Phone', 'AlternatePhone',
-        'CompanyName', 'Industry', 'Designation',
+        'FirstName', 'LastName', 'Email', 'Phone', 'AlternatePhone',
+        'Mobile', 'CompanyName', 'Industry', 'AnnualRevenue', 'Rating', 'Designation',
         'Country', 'State', 'City', 'Address',
-        'SourceId', 'LeadTypeId', 'LeadStatusId',
-        'AssignedToUserId', 'AssignedBy', 'IsActive', 'UpdatedBy'
+        'SourceId', 'LeadTypeId', 'LeadStatusId', 'ServiceRequiredId', 'EstimatedValue', 'Remarks',
+        'AssignedToUserId', 'AssignedBy', 'IsActive', 'UpdatedBy',
+        'IsConverted', 'ConvertedAt', 'ConvertedAccountId', 'ConvertedContactId', 'ConvertedDealId'
       ];
 
       allowedFields.forEach(field => {
@@ -357,7 +397,9 @@ create: async (leadData) => {
       logger.error('Error checking if lead is unqualified:', error);
       throw error;
     }
-  }
+  },
+
+
 };
 
 module.exports = LeadModel;

@@ -25,34 +25,48 @@ module.exports = {
     UPDATE_LEAD: 'update_lead',
     DELETE_LEAD: 'delete_lead',
     ASSIGN_LEAD: 'assign_lead',
-    QUALIFY_LEAD: 'qualify_lead',
+    CONVERT_LEAD: 'convert_lead',
     
-    // Appointment Management (NEW)
+    // Account Management
+    CREATE_ACCOUNT: 'create_account',
+    READ_ACCOUNT: 'read_account',
+    READ_ALL_ACCOUNTS: 'read_all_accounts',
+    UPDATE_ACCOUNT: 'update_account',
+    DELETE_ACCOUNT: 'delete_account',
+
+    // Contact Management
+    CREATE_CONTACT: 'create_contact',
+    READ_CONTACT: 'read_contact',
+    READ_ALL_CONTACTS: 'read_all_contacts',
+    UPDATE_CONTACT: 'update_contact',
+    DELETE_CONTACT: 'delete_contact',
+
+    // Deal Management
+    CREATE_DEAL: 'create_deal',
+    READ_DEAL: 'read_deal',
+    READ_ALL_DEALS: 'read_all_deals',
+    UPDATE_DEAL: 'update_deal',
+    DELETE_DEAL: 'delete_deal',
+    
+    // Appointment Management
     CREATE_APPOINTMENT: 'create_appointment',
     READ_APPOINTMENT: 'read_appointment',
     UPDATE_APPOINTMENT: 'update_appointment',
     DELETE_APPOINTMENT: 'delete_appointment',
     COMPLETE_APPOINTMENT: 'complete_appointment',
     
-    // MOM Management (NEW)
+    // MOM Management
     CREATE_MOM: 'create_mom',
     READ_MOM: 'read_mom',
     UPDATE_MOM: 'update_mom',
     DELETE_MOM: 'delete_mom',
     SHARE_MOM: 'share_mom',
     
-    // Activity Management (NEW)
+    // Activity Management
     CREATE_ACTIVITY: 'create_activity',
     READ_ACTIVITY: 'read_activity',
     UPDATE_ACTIVITY: 'update_activity',
     DELETE_ACTIVITY: 'delete_activity',
-    
-    // Opportunity Management
-    CREATE_OPPORTUNITY: 'create_opportunity',
-    READ_OPPORTUNITY: 'read_opportunity',
-    READ_ALL_OPPORTUNITIES: 'read_all_opportunities',
-    UPDATE_OPPORTUNITY: 'update_opportunity',
-    DELETE_OPPORTUNITY: 'delete_opportunity',
     
     // Proposal Management
     CREATE_PROPOSAL: 'create_proposal',
@@ -71,20 +85,34 @@ module.exports = {
     // Reports & Dashboard
     VIEW_REPORTS: 'view_reports',
     VIEW_ALL_REPORTS: 'view_all_reports',
-    VIEW_DASHBOARD: 'view_dashboard'
+    VIEW_DASHBOARD: 'view_dashboard',
+    
+    // Settings & Master Data
+    UPDATE_SETTINGS: 'update_settings'
   },
 
   // Lead Status IDs
   LEAD_STATUS: {
     NEW: 1,
-    CONTACTED: 2,
-    QUALIFIED: 3,
-    UNQUALIFIED: 4,
-    CONVERTED: 5,
-    LOST: 6
+    ATTEMPTED_TO_CONTACT: 2,
+    CONTACTED: 3,
+    QUALIFIED: 4,
+    UNQUALIFIED: 5,
+    JUNK_LEAD: 6
   },
 
-  // Appointment Status IDs (NEW)
+  // Deal Stage IDs
+  DEAL_STAGE: {
+    QUALIFICATION: 1,
+    NEEDS_ANALYSIS: 2,
+    VALUE_PROPOSITION: 3,
+    PROPOSAL_QUOTE: 4,
+    NEGOTIATION_REVIEW: 5,
+    CLOSED_WON: 6,
+    CLOSED_LOST: 7
+  },
+
+  // Appointment Status IDs
   APPOINTMENT_STATUS: {
     SCHEDULED: 1,
     COMPLETED: 2,
@@ -92,7 +120,7 @@ module.exports = {
     RESCHEDULED: 4
   },
 
-  // Activity Type IDs (NEW)
+  // Activity Type IDs
   ACTIVITY_TYPE: {
     CALL: 1,
     EMAIL: 2,
@@ -101,29 +129,12 @@ module.exports = {
     TASK: 5
   },
 
-  // MOM Status (NEW)
+  // MOM Status
   MOM_STATUS: {
     DRAFT: 'Draft',
     FINAL: 'Final',
     REVIEWED: 'Reviewed',
     SHARED: 'Shared'
-  },
-
-  // Opportunity Stage IDs
-  OPPORTUNITY_STAGE: {
-    PROSPECTING: 1,
-    QUALIFICATION: 2,
-    PROPOSAL: 3,
-    NEGOTIATION: 4,
-    CLOSED_WON: 5,
-    CLOSED_LOST: 6
-  },
-
-  // Opportunity Status IDs
-  OPPORTUNITY_STATUS: {
-    ACTIVE: 1,
-    WON: 2,
-    LOST: 3
   },
 
   // Proposal Status IDs
@@ -133,7 +144,8 @@ module.exports = {
     UNDER_REVIEW: 3,
     APPROVED: 4,
     REJECTED: 5,
-    EXPIRED: 6
+    EXPIRED: 6,
+    REJECTED_EXPIRED: 7
   },
 
   // Payment Status IDs
@@ -152,12 +164,6 @@ module.exports = {
     DELAYED: 4
   },
 
-  // Qualification Status IDs
-  QUALIFICATION_STATUS: {
-    QUALIFIED: 1,
-    UNQUALIFIED: 2,
-    IN_PROGRESS: 3
-  },
 
   // HTTP Status Codes
   HTTP_STATUS: {

@@ -21,7 +21,7 @@ ensureDirectoryExists('uploads/temp/');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     let uploadPath = 'uploads/temp/';
-    
+
     // Determine upload path based on file type or field name
     if (file.fieldname === 'proposalDocument') {
       uploadPath = 'uploads/proposals/';
@@ -30,7 +30,7 @@ const storage = multer.diskStorage({
       uploadPath = 'uploads/attachments/';
       ensureDirectoryExists(uploadPath);
     }
-    
+
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
@@ -38,7 +38,7 @@ const storage = multer.diskStorage({
     const uniqueSuffix = Date.now() + '-' + helpers.generateRandomString(8);
     const ext = path.extname(file.originalname);
     const nameWithoutExt = path.basename(file.originalname, ext);
-    
+
     // For proposals, use proposal-specific naming
     if (file.fieldname === 'proposalDocument') {
       const proposalId = req.params.id || 'draft';

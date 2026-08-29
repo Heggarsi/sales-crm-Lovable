@@ -1,0 +1,188 @@
+=========================================================================
+LEAD MODULE - QUESTIONS & ANSWERS
+(Based on the sales-crm backend source code, lead module)
+=========================================================================
+
+-------------------------------------------------------------------------
+Q1. API NAMING AND STRUCTURE
+-------------------------------------------------------------------------
+The API follows RESTful conventions. All lead routes are grouped under the
+`/api/leads` prefix and are defined in `src/routes/lead.routes.js`.
+
+Structure:  <METHOD>  <Path>                -> Controller / Permission
+-------------------------------------------------------------------------
+BASIC LEAD CRUD
+  POST    /api/leads                -> createLead      (CREATE_LEAD)
+  GET     /api/leads                -> getAllLeads     (READ_LEAD)
+  GET     /api/leads/:id            -> getLeadById     (READ_LEAD)
+  PUT     /api/leads/:id            -> updateLead      (UPDATE_LEAD)
+  DELETE  /api/leads/:id            -> deleteLead      (DELETE_LEAD)
+
+ASSIGNMENT
+  POST    /api/leads/:id/assign     -> assignLead      (ASSIGN_LEAD)
+
+CONVERSION
+  POST    /api/leads/:id/convert    -> convertLead     (CONVERT_LEAD)
+
+EMAIL
+  POST    /api/leads/:id/send-intro-email -> sendIntroEmail (UPDATE_LEAD)
+
+FOLLOW-UPS (nested under lead)
+  GET    /api/leads/:id/followups
+  GET    /api/leads/:id/followups/:followUpId
+  POST   /api/leads/:id/followups
+  PUT    /api/leads/:id/followups/:followUpId
+  DELETE /api/leads/:id/followups/:followUpId
+
+LOOKUP / MASTER ENDPOINTS (helper data)
+  GET /api/leads/sources, /types, /statuses, /services, /follow-up-types
+  CRUD for sources, types, statuses, services, follow-up-types
+  (e.g. POST /api/leads/sources, PUT /api/leads/types/:typeId, ...)
+
+Architecture layering (controller -> service -> model):
+  - lead.routes.js      : HTTP routing + middleware (auth, validation, RBAC)
+  - lead.controller.js  : thin handlers, no business logic; wraps service
+  - leadService.js      : business rules (access/role checks, duplicates,
+                          conversion transaction), uses AppError
+  - LeadsModel.js       : raw SQL queries against the `leads` table
+
+Naming conventions:
+  - Paths use lowercase, plural nouns; sub-resources nested (e.g. /:id/followups).
+  - Query params for list endpoint: page, limit, search, leadStatusId, sourceId,
+    leadTypeId, serviceRequiredId, assignedToUserId, sortBy, sortOrder.
+  - All responses follow a common envelope: { success, message, data }.
+
+-------------------------------------------------------------------------
+Q2. AUTHENTICATION APPROACH
+-------------------------------------------------------------------------
+JWT (JSON Web Token) based authentication, implemented in
+`src/middlewares/auth.middleware.js`.
+
+How it works:
+  - The router applies `router.use(authenticate)` to ALL lead routes
+    (lead.routes.js:11), so every lead endpoint requires a token.
+  - Client sends token in the request header:
+        Authorization: Bearer <access-token>
+  - `authenticate` middleware (auth.middleware.js:8):
+      1. Reads the `Authorization` header; if missing or not `Bearer `,
+         throws 401 "No token provided. Please login."
+      2. Verifies the token with `jwtHelper.verifyAccessToken`.
+      3. Loads the user (UserId, Name, Email, RoleId, IsActive/IsDeleted,
+         RoleName) from the DB by decoded userId.
+      4. Rejects with 401 if the user does not exist or is inactive/deleted.
+      5. Attaches the user to `req.user` for downstream middleware/controllers.
+
+Authorization (RBAC) - on top of authentication, `src/middlewares/rbac.middleware.js`:
+  - `checkPermission(PERMISSIONS.X)` gates each mutating/reading route
+    (e.g. create/read/update/delete/assign/convert). Denied -> 403.
+  - Coarse helpers also exist: `checkRole`, `isAdminOrManager`, `isAdmin`.
+  - Additional row-level ownership: a Sales Person may only access leads
+    assigned to them (enforced in the service layer, e.g. leadService.js,
+    and self-filtered in getAllLeads).
+  - `optionalAuth` exists but is NOT used by lead routes (they are fully secured).
+
+-------------------------------------------------------------------------
+Q3. VALIDATION RULES
+-------------------------------------------------------------------------
+Validation uses `express-validator` and is defined in
+`src/validations/leadValidation.js`, executed by the `validate` middleware
+(`src/middlewares/validation.middleware.js`).
+
+`validate` collects all errors and returns:
+  status 400, body: { success:false, message:"Validation failed",
+                      errors:[{ field, message }, ...] }
+
+Lead create/update rules (leadValidation.js):
+  - FirstName : required, trimmed, 2-100 chars
+  - LastName  : required, trimmed, 1-100 chars
+  - Email     : optional; if provided must be a valid email format
+  - Phone / AlternatePhone : optional; must match phone regex
+                ^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$
+  - CompanyName : optional, max 200 chars
+  - Industry / Designation / Country / State / City : optional, length capped
+  - SourceId   : required, integer >= 1 (lead source)
+  - LeadTypeId : required, integer >= 1 (lead type)
+  - ServiceRequiredId : optional, integer >= 1
+  - EstimatedValue : optional, decimal (up to 2 decimal places)
+  - Remarks    : optional, max 5000 chars
+  - AssignedToUserId : optional, integer >= 1
+
+Other endpoint validations:
+  - `:id`, `:followUpId`, `:sourceId`, `:typeId`, `:statusId`, `:serviceId`,
+    `:followUpTypeId` params validated as integer >= 1 where applicable.
+  - Follow-up: FollowUpDate required (ISO8601), FollowUpTypeId required int,
+    NextFollowUpDate optional ISO8601, Remarks optional.
+  - Additional business validation occurs in the service layer, e.g.:
+      * A lead can only be assigned to a user with the Sales Person role.
+      * A Sales Person can only access/update/delete their assigned leads.
+
+-------------------------------------------------------------------------
+Q4. HOW DUPLICATE LEADS SHOULD BE HANDLED
+-------------------------------------------------------------------------
+Duplication is primarily prevented at the DATABASE level and now also
+checked in the SERVICE layer.
+
+Database-level (schema.sql `leads` table):
+  - UNIQUE KEY `uk_leads_email` (Email)   -> one row per email
+  - UNIQUE KEY on LeadNumber (generated)  -> auto-generated unique number
+
+Application-level duplicate handling (implemented in leadService.js):
+  - ON CREATE (`createLead`): if `Email` is supplied, it queries for an
+    existing lead with the same email via `LeadModel.findByEmail`. If found,
+    it throws:
+        AppError('A lead with this email already exists', HTTP_STATUS.CONFLICT)
+    -> HTTP 409.
+  - ON UPDATE (`updateLead`): same check but EXCLUDES the current lead
+    (compares `existingLead.LeadId !== leadId`) so saving an unchanged email
+    does not falsely trigger a duplicate. Throws the same 409.
+  - Model helper `LeadModel.findByEmail` (LeadsModel.js) only matches active,
+    non-deleted leads (WHERE Email = ? AND IsDeleted = 0).
+
+Recommended behavior / best practice observed:
+  - Return HTTP 409 Conflict with a clear, user-friendly message
+    ("A lead with this email already exists") rather than a raw DB error.
+  - Exclude the current record when updating (allows no-op email saves).
+  - Only soft-deleted rows are excluded; deleted leads do not block new ones
+    (because of the IsDeleted filter) - note the unique DB index still
+    technically holds even on soft-deleted rows, so hard-delete or a partial
+    unique index may be needed if reusing deleted emails must be allowed.
+
+Note: Phone/Mobile/CompanyName are NOT unique; only Email is enforced.
+
+-------------------------------------------------------------------------
+Q5. HOW ERRORS SHOULD BE REPORTED
+-------------------------------------------------------------------------
+Errors flow through the global error handler
+`src/middlewares/errorHandler.middleware.js` (registered app-wide), which
+normalizes every error into a uniform JSON response.
+
+Standard error response envelope:
+  {
+    "success": false,
+    "message": "<human readable message>",
+    "errors":  <field-level errors array or null>,
+    "stack":   <only included in development (NODE_ENV=development)>
+  }
+
+Mapping of error types to HTTP status (as currently handled):
+  - AppError                        -> its own statusCode (default 500)
+  - MySQL ER_DUP_ENTRY (duplicate)  -> 409 CONFLICT,
+       message: "Duplicate value for <field>. This value already exists."
+       (fallback if not caught at service level)
+  - MySQL ER_NO_REFERENCED_ROW_2    -> 400 (foreign key violation)
+  - MySQL ER_DATA_TOO_LONG          -> 400
+  - JWT errors (JsonWebTokenError / TokenExpiredError) -> 401
+  - ValidationError                 -> 400
+  - Route not found (notFound)      -> 404 "Route not found - <url>"
+
+Status codes used across the lead module (HTTP_STATUS in constants.js):
+  - 200 OK, 201 CREATED, 400 BAD_REQUEST, 401 UNAUTHORIZED,
+    403 FORBIDDEN, 404 NOT_FOUND, 409 CONFLICT, 500 INTERNAL_SERVER_ERROR
+
+The service layer throws `AppError(message, statusCode)` for expected,
+"operational" errors (validation, access denied, duplicates, not found),
+which the global handler formats consistently. Unexpected/technical errors
+default to 500 and are logged via `logger.error` with request context
+(url, method, status, stack) for debugging.
+
+=========================================================================

@@ -41,6 +41,50 @@ const ActivityTypeModel = {
       logger.error('Error finding activity type by name:', error);
       throw error;
     }
+  },
+
+  // Create new activity type
+  create: async (typeData) => {
+    try {
+      const { TypeName, Description } = typeData;
+      const [result] = await pool.query(
+        'INSERT INTO activitytype (TypeName, Description) VALUES (?, ?)',
+        [TypeName, Description]
+      );
+      return result.insertId;
+    } catch (error) {
+      logger.error('Error creating activity type:', error);
+      throw error;
+    }
+  },
+
+  // Update activity type
+  update: async (typeId, typeData) => {
+    try {
+      const { TypeName, Description } = typeData;
+      const [result] = await pool.query(
+        'UPDATE activitytype SET TypeName = ?, Description = ? WHERE ActivityTypeId = ?',
+        [TypeName, Description, typeId]
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      logger.error('Error updating activity type:', error);
+      throw error;
+    }
+  },
+
+  // Delete activity type
+  delete: async (typeId) => {
+    try {
+      const [result] = await pool.query(
+        'DELETE FROM activitytype WHERE ActivityTypeId = ?',
+        [typeId]
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      logger.error('Error deleting activity type:', error);
+      throw error;
+    }
   }
 };
 

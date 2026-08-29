@@ -1,6 +1,6 @@
 const ActivityLogModel = require('../models/ActivityLogModel');
 const ActivityTypeModel = require('../models/ActivityTypeModel');
-const LeadModel = require('../models/LeadsModel');
+const AppointmentModel = require('../models/AppointmentModel');
 const { AppError } = require('../middlewares/errorHandler.middleware');
 const { HTTP_STATUS, ROLES } = require('../config/constants');
 const logger = require('../utils/logger');
@@ -10,18 +10,18 @@ const ActivityService = {
   // Log activity
   logActivity: async (activityData, user) => {
     try {
-      const { LeadId } = activityData;
+      const { AppointmentId } = activityData;
 
-      // Check if lead exists
-      const lead = await LeadModel.findById(LeadId);
-      if (!lead) {
-        throw new AppError('Lead not found', HTTP_STATUS.NOT_FOUND);
+      // Check if appointment exists
+      const appointment = await AppointmentModel.findById(AppointmentId);
+      if (!appointment) {
+        throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
       }
 
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
-        if (lead.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only log activities for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+        if (appointment.CreatedByUserId !== user.UserId) {
+          throw new AppError('You can only log activities for appointments assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -45,9 +45,9 @@ const ActivityService = {
   // Get all activities
   getAllActivities: async (filters, user) => {
     try {
-      // Sales Person can only see activities for their assigned leads
+      // Sales Person can only see activities for their created appointments
       if (user.RoleId === ROLES.SALES_PERSON) {
-        filters.assignedToUserId = user.UserId;
+        filters.createdByUserId = user.UserId;
       }
 
       const result = await ActivityLogModel.getAll(filters);
@@ -75,8 +75,8 @@ const ActivityService = {
 
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
-        if (activity.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only access activities for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+        if (activity.CreatedByUserId !== user.UserId) {
+          throw new AppError('You can only access activities for appointments assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -98,8 +98,8 @@ const ActivityService = {
 
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
-        if (activity.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only update activities for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+        if (activity.CreatedByUserId !== user.UserId) {
+          throw new AppError('You can only update activities for appointments assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -127,8 +127,8 @@ const ActivityService = {
 
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
-        if (activity.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only delete activities for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+        if (activity.CreatedByUserId !== user.UserId) {
+          throw new AppError('You can only delete activities for appointments assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
@@ -143,27 +143,27 @@ const ActivityService = {
     }
   },
 
-  // Get activities by lead
-  getActivitiesByLead: async (leadId, user) => {
+  // Get activities by appointment
+  getActivitiesByAppointment: async (appointmentId, user) => {
     try {
-      const lead = await LeadModel.findById(leadId);
+      const appointment = await AppointmentModel.findById(appointmentId);
 
-      if (!lead) {
-        throw new AppError('Lead not found', HTTP_STATUS.NOT_FOUND);
+      if (!appointment) {
+        throw new AppError('Appointment not found', HTTP_STATUS.NOT_FOUND);
       }
 
       // In-memory ownership check
       if (user.RoleId === ROLES.SALES_PERSON) {
-        if (lead.AssignedToUserId !== user.UserId) {
-          throw new AppError('You can only access activities for leads assigned to you', HTTP_STATUS.FORBIDDEN);
+        if (appointment.CreatedByUserId !== user.UserId) {
+          throw new AppError('You can only access activities for appointments assigned to you', HTTP_STATUS.FORBIDDEN);
         }
       }
 
-      const activities = await ActivityLogModel.getByLeadId(leadId);
+      const activities = await ActivityLogModel.getByAppointmentId(appointmentId);
 
       return activities;
     } catch (error) {
-      logger.error('Get activities by lead error:', error);
+      logger.error('Get activities by appointment error:', error);
       throw error;
     }
   },
