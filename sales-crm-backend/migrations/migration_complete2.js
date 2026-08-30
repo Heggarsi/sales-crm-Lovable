@@ -51,7 +51,7 @@ const MONTH_CONFIG = {
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'salescrmuser',
-  password: process.env.DB_PASSWORD || 'StrongPassword123!',
+  password: process.env.DB_PASSWORD ,
   database: process.env.DB_NAME || 'salescrmv1',
   port: Number(process.env.DB_PORT || 3306),
   multipleStatements: true
